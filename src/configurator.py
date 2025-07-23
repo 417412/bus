@@ -119,6 +119,22 @@ def get_password_securely(prompt: str, env_var: str = None) -> str:
     
     return getpass.getpass(f"{prompt}: ")
 
+def update_directories(config_manager: ConfigManager, args: argparse.Namespace) -> bool:
+    """Update directory configurations."""
+    updated = False
+    
+    if args.logs_dir:
+        print(f"Setting logs directory to: {args.logs_dir}")
+        config_manager.update_path_variable("LOGS_DIR", args.logs_dir)
+        updated = True
+    
+    if args.state_dir:
+        print(f"Setting state directory to: {args.state_dir}")
+        config_manager.update_path_variable("STATE_DIR", args.state_dir)
+        updated = True
+    
+    return updated
+
 def update_database_config(config_manager: ConfigManager, args: argparse.Namespace) -> bool:
     """Update database configurations with encrypted password support."""
     from src.config.settings import DATABASE_CONFIG
@@ -216,135 +232,6 @@ def update_database_config(config_manager: ConfigManager, args: argparse.Namespa
     
     return updated
 
-def encrypt_existing_passwords(config_manager: ConfigManager) -> bool:
-    """Encrypt any existing plaintext passwords in the configuration."""
-    from src.config.settings import DATABASE_CONFIG
-    
-    password_manager = get_password_manager()
-    
-    print("Checking for plaintext passwords to encrypt...")
-    
-    # Check if any passwords need encryption
-    needs_encryption = False
-    
-    def check_needs_encryption(obj, path=""):
-        nonlocal needs_encryption
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                current_path = f"{path}.{key}" if path else key
-                if key.lower() == 'password' and isinstance(value, str) and value:
-                    if not password_manager.is_encrypted(value):
-                        print(f"Found plaintext password at: {current_path}")
-                        needs_encryption = True
-                else:
-                    check_needs_encryption(value, current_path)
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                check_needs_encryption(item, f"{path}[{i}]")
-    
-    check_needs_encryption(DATABASE_CONFIG)
-    
-    if needs_encryption:
-        print("Encrypting plaintext passwords...")
-        encrypted_config = password_manager.encrypt_config_passwords(DATABASE_CONFIG)
-        config_manager.update_dict_variable("DATABASE_CONFIG", encrypted_config)
-        print("Passwords encrypted successfully!")
-        return True
-    else:
-        print("All passwords are already encrypted or empty.")
-        return False
-
-def update_directories(config_manager: ConfigManager, args: argparse.Namespace) -> bool:
-    """Update directory configurations."""
-    updated = False
-    
-    if args.logs_dir:
-        print(f"Setting logs directory to: {args.logs_dir}")
-        config_manager.update_path_variable("LOGS_DIR", args.logs_dir)
-        updated = True
-    
-    if args.state_dir:
-        print(f"Setting state directory to: {args.state_dir}")
-        config_manager.update_path_variable("STATE_DIR", args.state_dir)
-        updated = True
-    
-    return updated
-
-def update_database_config(config_manager: ConfigManager, args: argparse.Namespace) -> bool:
-    """Update database configurations."""
-    from src.config.settings import DATABASE_CONFIG
-    
-    updated = False
-    new_config = DATABASE_CONFIG.copy()
-    
-    # PostgreSQL updates
-    if any([args.pg_host, args.pg_port, args.pg_database, args.pg_user, args.pg_password]):
-        pg_config = new_config["PostgreSQL"].copy()
-        
-        if args.pg_host:
-            pg_config["host"] = args.pg_host
-            print(f"Setting PostgreSQL host to: {args.pg_host}")
-        if args.pg_port:
-            pg_config["port"] = args.pg_port
-            print(f"Setting PostgreSQL port to: {args.pg_port}")
-        if args.pg_database:
-            pg_config["database"] = args.pg_database
-            print(f"Setting PostgreSQL database to: {args.pg_database}")
-        if args.pg_user:
-            pg_config["user"] = args.pg_user
-            print(f"Setting PostgreSQL user to: {args.pg_user}")
-        if args.pg_password:
-            pg_config["password"] = args.pg_password
-            print("Setting PostgreSQL password (hidden)")
-        
-        new_config["PostgreSQL"] = pg_config
-        updated = True
-    
-    # Firebird updates
-    if any([args.fb_host, args.fb_database, args.fb_user, args.fb_password, args.fb_charset]):
-        fb_config = new_config["Firebird"].copy()
-        
-        if args.fb_host:
-            fb_config["host"] = args.fb_host
-            print(f"Setting Firebird host to: {args.fb_host}")
-        if args.fb_database:
-            fb_config["database"] = args.fb_database
-            print(f"Setting Firebird database to: {args.fb_database}")
-        if args.fb_user:
-            fb_config["user"] = args.fb_user
-            print(f"Setting Firebird user to: {args.fb_user}")
-        if args.fb_password:
-            fb_config["password"] = args.fb_password
-            print("Setting Firebird password (hidden)")
-        if args.fb_charset:
-            fb_config["charset"] = args.fb_charset
-            print(f"Setting Firebird charset to: {args.fb_charset}")
-        
-        new_config["Firebird"] = fb_config
-        updated = True
-    
-    # YottaDB updates
-    if any([args.yottadb_url, args.yottadb_timeout, args.yottadb_retries]):
-        ydb_config = new_config["YottaDB"].copy()
-        
-        if args.yottadb_url:
-            ydb_config["api_url"] = args.yottadb_url
-            print(f"Setting YottaDB URL to: {args.yottadb_url}")
-        if args.yottadb_timeout:
-            ydb_config["timeout"] = args.yottadb_timeout
-            print(f"Setting YottaDB timeout to: {args.yottadb_timeout}")
-        if args.yottadb_retries:
-            ydb_config["max_retries"] = args.yottadb_retries
-            print(f"Setting YottaDB max retries to: {args.yottadb_retries}")
-        
-        new_config["YottaDB"] = ydb_config
-        updated = True
-    
-    if updated:
-        config_manager.update_dict_variable("DATABASE_CONFIG", new_config)
-    
-    return updated
-
 def update_logging_config(config_manager: ConfigManager, args: argparse.Namespace) -> bool:
     """Update logging configuration."""
     from src.config.settings import LOGGING_CONFIG
@@ -438,6 +325,44 @@ def update_system_config(config_manager: ConfigManager, args: argparse.Namespace
         config_manager.update_dict_variable("SYSTEM_CONFIG", new_config)
     
     return updated
+
+def encrypt_existing_passwords(config_manager: ConfigManager) -> bool:
+    """Encrypt any existing plaintext passwords in the configuration."""
+    from src.config.settings import DATABASE_CONFIG
+    
+    password_manager = get_password_manager()
+    
+    print("Checking for plaintext passwords to encrypt...")
+    
+    # Check if any passwords need encryption
+    needs_encryption = False
+    
+    def check_needs_encryption(obj, path=""):
+        nonlocal needs_encryption
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                current_path = f"{path}.{key}" if path else key
+                if key.lower() == 'password' and isinstance(value, str) and value:
+                    if not password_manager.is_encrypted(value):
+                        print(f"Found plaintext password at: {current_path}")
+                        needs_encryption = True
+                else:
+                    check_needs_encryption(value, current_path)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                check_needs_encryption(item, f"{path}[{i}]")
+    
+    check_needs_encryption(DATABASE_CONFIG)
+    
+    if needs_encryption:
+        print("Encrypting plaintext passwords...")
+        encrypted_config = password_manager.encrypt_config_passwords(DATABASE_CONFIG)
+        config_manager.update_dict_variable("DATABASE_CONFIG", encrypted_config)
+        print("Passwords encrypted successfully!")
+        return True
+    else:
+        print("All passwords are already encrypted or empty.")
+        return False
 
 def load_config_from_file(config_manager: ConfigManager, config_file: str) -> bool:
     """Load configuration from JSON file."""
@@ -585,8 +510,8 @@ def main():
     # Check if any updates are requested
     update_args = [
         args.logs_dir, args.state_dir,
-        args.pg_host, args.pg_port, args.pg_database, args.pg_user, args.pg_password,
-        args.fb_host, args.fb_database, args.fb_user, args.fb_password, args.fb_charset,
+        args.pg_host, args.pg_port, args.pg_database, args.pg_user, args.pg_password, args.pg_password_env,
+        args.fb_host, args.fb_database, args.fb_user, args.fb_password, args.fb_password_env, args.fb_charset,
         args.yottadb_url, args.yottadb_timeout, args.yottadb_retries,
         args.log_level, args.log_max_size, args.log_backup_count, args.log_retention,
         args.batch_size, args.max_retries, args.sync_interval, args.retry_delay,

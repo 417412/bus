@@ -20,3 +20,7 @@ src/config/settings.py.backup
 src/config/__pycache__/settings.cpython-311.pyc
 src/utils/__pycache__/config_manager.cpython-311.pyc
 logs/connectors.log
+logs/connectors.log
+logs/repositories.log
+logs/test_etl.log
+src/config/__pycache__/settings.cpython-311.pyc
