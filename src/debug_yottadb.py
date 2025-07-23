@@ -4,8 +4,10 @@ import time
 import sys
 import os
 
-# Add the parent directory to the path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the parent directory to the path so Python can find the modules
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(parent_dir)
+
 from src.config.settings import DATABASE_CONFIG, setup_logger
 
 # Set up logging

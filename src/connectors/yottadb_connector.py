@@ -23,38 +23,63 @@ class YottaDBConnector:
     def connect(self) -> bool:
         """
         Test connection to YottaDB API endpoint.
-        Since the API takes 2-3 minutes, we'll do a lightweight test.
+        Since the API takes 2-3 minutes, we'll do a lightweight test first,
+        then a full test if needed.
         """
         try:
             self.logger.info(f"Testing connection to YottaDB API: {self.api_url}")
             self.logger.info(f"Note: YottaDB API typically takes 2-3 minutes to respond")
+            self.logger.info(f"Using timeouts: connect={self.connect_timeout}s, read={self.timeout}s")
             
-            # Test with a shorter timeout first to check basic connectivity
+            # First try a quick connectivity test with shorter timeout
             try:
+                self.logger.info("Performing quick connectivity test...")
                 response = requests.get(
                     self.api_url, 
-                    timeout=(self.connect_timeout, 10),  # Quick test with 10 second read timeout
+                    timeout=(self.connect_timeout, 30),  # 30 second read timeout for quick test
                     headers={'User-Agent': 'Medical-ETL/1.0'}
                 )
-                # If we get here, the connection works (even if it timed out on read)
-                self.logger.info("Basic connectivity to YottaDB API confirmed")
+                # If we get a response (even if it times out on read), connection works
+                self.logger.info("Quick connectivity test passed")
                 return True
+                
             except requests.exceptions.ReadTimeout:
-                # This is expected for the full API call - it means connection works
-                self.logger.info("Connection established (read timeout expected for quick test)")
+                # This is expected for the quick test - it means connection works
+                self.logger.info("Quick test timed out (expected) - connection is working")
                 return True
+                
             except requests.exceptions.ConnectTimeout as e:
                 self.logger.error(f"Connection timeout to YottaDB API: {str(e)}")
-                return False
+                # Try one more time with full timeout settings
+                self.logger.info("Retrying with full timeout settings...")
+                try:
+                    response = requests.get(
+                        self.api_url,
+                        timeout=(self.connect_timeout, self.timeout),
+                        headers={'User-Agent': 'Medical-ETL/1.0'}
+                    )
+                    self.logger.info("Full timeout test successful")
+                    return True
+                except requests.exceptions.ConnectTimeout:
+                    self.logger.error("Connection timeout on retry - API is not reachable")
+                    return False
+                except requests.exceptions.ReadTimeout:
+                    self.logger.info("Full timeout test - read timeout but connection works")
+                    return True
+                except Exception as retry_e:
+                    self.logger.error(f"Retry failed: {str(retry_e)}")
+                    return False
+                    
             except requests.exceptions.ConnectionError as e:
                 self.logger.error(f"Connection error to YottaDB API: {str(e)}")
                 return False
+                
             except Exception as e:
-                # If we got a response (even error), connection works
-                if hasattr(e, 'response'):
-                    self.logger.info("Connection to YottaDB API confirmed")
-                    return True
                 self.logger.error(f"Error testing YottaDB API connection: {str(e)}")
+                # If we got a response (even error), connection might work
+                if hasattr(e, 'response') and e.response is not None:
+                    self.logger.info("Got response despite error - connection appears to work")
+                    return True
                 return False
                 
         except Exception as e:
@@ -81,12 +106,13 @@ class YottaDBConnector:
             try:
                 self.logger.info(f"Fetching all patients from YottaDB API (attempt {attempt + 1}/{self.max_retries})")
                 self.logger.info(f"This operation typically takes 2-3 minutes, please wait...")
+                self.logger.info(f"Using full timeout settings: connect={self.connect_timeout}s, read={self.timeout}s")
                 
                 start_time = time.time()
                 
                 response = requests.get(
                     self.api_url, 
-                    timeout=(self.connect_timeout, self.timeout),  # Use full timeout
+                    timeout=(self.connect_timeout, self.timeout),  # Use full configured timeouts
                     headers={'User-Agent': 'Medical-ETL/1.0'}
                 )
                 
@@ -163,7 +189,7 @@ class YottaDBConnector:
                     continue
             except requests.exceptions.ReadTimeout as e:
                 self.logger.error(f"Read timeout from YottaDB API (attempt {attempt + 1}): {str(e)}")
-                self.logger.error(f"API call exceeded {self.timeout} seconds. Consider increasing timeout.")
+                self.logger.error(f"API call exceeded {self.timeout} seconds. Current timeout setting: {self.timeout}s")
                 if attempt < self.max_retries - 1:
                     self.logger.info(f"Retrying in 60 seconds...")
                     time.sleep(60)
