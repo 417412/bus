@@ -27,22 +27,22 @@ src/
 
 ## Key Features
 
-### 🔄 Multi-Source Data Integration
+### Multi-Source Data Integration
 - **YottaDB (qMS)**: HTTP API-based data retrieval with full synchronization
 - **Firebird (Infoclinica)**: Database connection with incremental delta sync
 - **PostgreSQL**: Centralized storage with automated patient matching
 
-### 🤖 Intelligent Patient Matching
+### Intelligent Patient Matching
 - Automatic patient deduplication based on document numbers
 - Cross-system patient identity resolution
 - Database triggers for real-time matching during data insertion
 
-### ⚡ Scalable Processing
+### Scalable Processing
 - Batch processing with configurable batch sizes
 - Resumable operations with state persistence
 - Configurable sync intervals per data source
 
-### 🛡️ Robust Error Handling
+### Robust Error Handling
 - Retry mechanisms for network timeouts
 - Comprehensive logging and monitoring
 - Graceful failure recovery
@@ -156,12 +156,12 @@ src/
         "Firebird": {
             "host": "firebird_server:3050",
             "database": "database_name",
-            "user": "SYSDBA",
+            "user": "user",
             "password": "password"
         },
         "YottaDB": {
             "api_url": "http://yottadb_server/cgi-bin/qms_export_pat",
-            "timeout": 300,  # 5 minutes for API calls
+            "timeout": 300,
             "connect_timeout": 30,
             "max_retries": 2
         }
