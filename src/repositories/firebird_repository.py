@@ -346,3 +346,7 @@ class FirebirdRepository:
         except Exception as e:
             self.logger.error(f"Error getting patient count from Firebird: {e}")
             return 0 if not include_last_id else (0, None)
+        
+    def get_source_id(self) -> int:
+        """Get the source ID for this repository."""
+        return self.source_id

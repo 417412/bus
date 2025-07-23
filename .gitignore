@@ -1,0 +1,6 @@
+logs/etl_daemon_firebird.log
+logs/etl_daemon_yottadb.log
+state/infoclinica_last_sync.txt
+state/yottadb_last_id.txt
+state/yottadb_last_sync.txt
+src/etl_status.json

@@ -188,7 +188,7 @@ class YottaDBTransformer:
             
             # Build standardized patient record
             return {
-                "hisnumber": hisnumber,  # Keep full hisnumber like "41449/A22"
+                "hisnumber": hisnumber,  # Keep full hisnumber like "41449/A22" as string
                 "source": raw_patient.get('source', 1),  # qMS = 1
                 "businessunit": raw_patient.get('businessunit', 1),  # Default businessunit for qMS
                 "lastname": raw_patient.get('lastname'),
@@ -206,7 +206,7 @@ class YottaDBTransformer:
             self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
             # Return a minimal record with the hisnumber and source to maintain data flow
             return {
-                "hisnumber": raw_patient.get('hisnumber', ''),
+                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
                 "source": raw_patient.get('source', 1),
                 "businessunit": raw_patient.get('businessunit', 1),
                 "documenttypes": 17,  # Default to "Иные документы" for error cases

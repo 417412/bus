@@ -1,17 +1,18 @@
 {
   "operation": "delta_sync",
-  "start_time": "2025-07-23T05:18:21.958382",
-  "total_delta_records": 0,
-  "unique_patients": 0,
-  "processed_records": 0,
-  "success_count": 0,
+  "source": "FirebirdRepository",
+  "start_time": "2025-07-23T21:43:36.169199",
+  "total_delta_records": 1,
+  "unique_patients": 1,
+  "processed_records": 1,
+  "success_count": 1,
   "error_count": 0,
   "operations": {
-    "INSERT": 0,
+    "INSERT": 1,
     "UPDATE": 0,
     "DELETE": 0
   },
   "status": "completed",
-  "end_time": "2025-07-23T05:18:21.961250",
-  "duration": 0.002868
+  "end_time": "2025-07-23T21:43:36.193036",
+  "duration": 0.023837
 }

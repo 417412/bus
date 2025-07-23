@@ -185,23 +185,23 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
         # Get count from source
         source_count = etl_service.source_repo.get_total_patient_count()
         
-        # Get count from destination (PostgreSQL)
-        destination_count = etl_service.target_repo.get_patient_count_by_source(etl_service.source_repo.source_id)
+        # Get count from destination (PostgreSQL) for this specific source
+        source_id = etl_service.source_repo.get_source_id()
+        destination_count = etl_service.target_repo.get_total_patient_count(source=source_id)
         
         # Consider complete if we have at least 95% of records
         # (some might be skipped due to data quality issues)
         completion_threshold = 0.95
-        is_complete = (destination_count >= source_count * completion_threshold)
+        is_complete = (destination_count >= source_count * completion_threshold) if source_count > 0 else True
         
         logger.info(f"Source ({etl_service.source_repo.__class__.__name__}) count: {source_count}, "
-                   f"Destination count: {destination_count}, "
-                   f"Completion rate: {destination_count/source_count:.2%}")
+                   f"Destination count for source {source_id}: {destination_count}, "
+                   f"Completion rate: {destination_count/source_count*100:.1f}%")
         
         return is_complete, source_count, destination_count
     except Exception as e:
         logger.error(f"Error checking initial load completion: {e}")
         return False, 0, 0
-
 
 def perform_initial_load(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
     """
@@ -216,16 +216,18 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
         Status dictionary
     """
     source_name = etl_service.source_repo.__class__.__name__
+    source_id = etl_service.source_repo.get_source_id()
     
     # First check if initial load is already complete
     if force_check:
         is_complete, source_count, destination_count = check_initial_load_complete(etl_service)
         if is_complete:
-            logger.info(f"Initial load already complete: {destination_count}/{source_count} records loaded")
+            logger.info(f"Initial load already complete for source {source_id}: {destination_count}/{source_count} records loaded")
             
             status = {
                 "operation": "initial_load",
                 "source": source_name,
+                "source_id": source_id,
                 "start_time": datetime.now(),
                 "end_time": datetime.now(),
                 "duration": 0,
@@ -236,7 +238,7 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
                 "destination_count": destination_count,
                 "completion_rate": destination_count/source_count if source_count > 0 else 0,
                 "status": "completed",
-                "message": "Initial load was already complete"
+                "message": f"Initial load was already complete for source {source_id}"
             }
             
             # Save last sync time
@@ -244,11 +246,12 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             return status
     
-    logger.info(f"Starting initial data load from {source_name}")
+    logger.info(f"Starting initial data load from {source_name} (source ID: {source_id})")
     start_time = datetime.now()
     status = {
         "operation": "initial_load",
         "source": source_name,
+        "source_id": source_id,
         "start_time": start_time,
         "processed_records": 0,
         "success_count": 0,
@@ -266,7 +269,8 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             status["last_id"] = last_id
         
         # Get initial count for progress tracking
-        source_count, _ = etl_service.source_repo.get_total_patient_count(include_last_id=True)
+        source_count = etl_service.source_repo.get_total_patient_count()
+        logger.info(f"Total records in source {source_id}: {source_count}")
         
         consecutive_empty_batches = 0
         max_empty_batches = 3  # Stop after 3 consecutive empty batches
@@ -349,33 +353,28 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             total_processed += batch_success_count
             
-            # Get current progress
-            _, current_last_id = etl_service.source_repo.get_total_patient_count(include_last_id=True)
-            progress = "unknown"
-            if current_last_id and last_id:
-                try:
-                    progress = f"{last_id}/{current_last_id}"
-                except (ValueError, TypeError):
-                    progress = f"{last_id}/{current_last_id}"
-            
-            logger.debug(f"Processed batch in {batch_duration:.2f}s, "
-                        f"total processed: {total_processed}, "
-                        f"progress: {progress}")
+            # Get current progress - check completion periodically
+            if batch_counter % 5 == 0:  # Check every 5 batches
+                is_complete, current_source_count, current_dest_count = check_initial_load_complete(etl_service)
+                progress_percent = (current_dest_count / current_source_count * 100) if current_source_count > 0 else 0
+                
+                logger.info(f"Batch {batch_counter} processed in {batch_duration:.2f}s, "
+                           f"batch success: {batch_success_count}/{len(patients)}, "
+                           f"total processed: {total_processed}, "
+                           f"overall progress: {current_dest_count}/{current_source_count} ({progress_percent:.1f}%)")
+                
+                if is_complete:
+                    logger.info(f"Initial load complete: {current_dest_count}/{current_source_count} records loaded")
+                    break
+            else:
+                logger.debug(f"Batch {batch_counter} processed in {batch_duration:.2f}s, "
+                           f"batch success: {batch_success_count}/{len(patients)}, "
+                           f"total processed: {total_processed}")
             
             # Check if we've reached the end of data
             if len(patients) < max_records:
                 logger.info(f"Retrieved fewer records ({len(patients)}) than requested ({max_records}), "
                           f"might be near end of data")
-            
-            # Periodically check completion (every 5 batches)
-            if batch_counter % 5 == 0:
-                is_complete, final_source_count, final_dest_count = check_initial_load_complete(etl_service)
-                status["source_count"] = final_source_count
-                status["destination_count"] = final_dest_count
-                
-                if is_complete:
-                    logger.info(f"Initial load complete: {final_dest_count}/{final_source_count} records loaded")
-                    break
         
         # Final completion check
         is_complete, final_source_count, final_dest_count = check_initial_load_complete(etl_service)
@@ -391,22 +390,23 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
         if is_complete:
             # Save last sync time only if we actually completed the initial load
             etl_service.source_repo.save_last_sync_time()
-            logger.info(f"Initial load {status['status']}, "
+            logger.info(f"Initial load {status['status']} for source {source_id}, "
                       f"processed {total_processed} records in "
-                      f"{status['duration']:.2f} seconds")
+                      f"{status['duration']:.2f} seconds. "
+                      f"Final completion rate: {status['completion_rate']:.1%}")
         else:
-            logger.warning(f"Initial load not complete: {final_dest_count}/{final_source_count} records loaded. "
-                         f"Will continue on next run.")
+            logger.warning(f"Initial load not complete for source {source_id}: "
+                         f"{final_dest_count}/{final_source_count} records loaded "
+                         f"({status['completion_rate']:.1%}). Will continue on next run.")
         
         return status
     except Exception as e:
-        logger.error(f"Error during initial load: {e}")
+        logger.error(f"Error during initial load for source {source_id}: {e}")
         status["end_time"] = datetime.now()
         status["duration"] = (status["end_time"] - start_time).total_seconds()
         status["status"] = "failed"
         status["error"] = str(e)
         return status
-
 
 def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
     """
@@ -758,25 +758,28 @@ def main():
                     # For Firebird, check initial load completion and do delta sync
                     is_complete, source_count, destination_count = check_initial_load_complete(etl_service)
                     last_sync_time = etl_service.source_repo.get_last_sync_time()
+                    source_id = etl_service.source_repo.get_source_id()
                     
                     if not is_complete:
                         # Initial load is not complete, continue with it
-                        logger.info(f"Initial load not complete ({destination_count}/{source_count}). Continuing...")
+                        logger.info(f"Initial load not complete for source {source_id} "
+                                  f"({destination_count}/{source_count} = {destination_count/source_count*100:.1f}%). Continuing...")
                         status = perform_initial_load(etl_service, args.max_records)
                         
                         # If the load is still not complete, we'll continue in the next cycle
                         if status.get("status") == "completed" and status.get("completion_rate", 0) < 0.95:
-                            logger.warning("Initial load cycle completed but overall load is not complete. "
-                                          "Will continue in next cycle.")
+                            logger.warning(f"Initial load cycle completed but overall load for source {source_id} "
+                                          f"is not complete ({status.get('completion_rate', 0):.1%}). "
+                                          f"Will continue in next cycle.")
                     elif last_sync_time is None:
                         # Initial load is complete but no sync time recorded
                         # This can happen if we're switching from an old version
-                        logger.info("Initial load complete but no sync time recorded. Setting now.")
+                        logger.info(f"Initial load complete for source {source_id} but no sync time recorded. Setting now.")
                         etl_service.source_repo.save_last_sync_time()
-                        status = {"operation": "sync_time_update", "status": "completed"}
+                        status = {"operation": "sync_time_update", "source_id": source_id, "status": "completed"}
                     else:
                         # Initial load is complete and we have a sync time, do delta sync
-                        logger.info(f"Last sync: {last_sync_time.isoformat()}, performing delta sync")
+                        logger.info(f"Source {source_id} - Last sync: {last_sync_time.isoformat()}, performing delta sync")
                         status = perform_delta_sync(etl_service, args.max_records)
                 
                 write_status(args.status_file, status)

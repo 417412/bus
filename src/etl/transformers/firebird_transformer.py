@@ -75,34 +75,47 @@ class FirebirdTransformer:
         Returns:
             Standardized patient record
         """
-        # Format birthdate
-        birthdate = raw_patient.get('birthdate')
-        if isinstance(birthdate, datetime):
-            birthdate = birthdate.date().isoformat()
-        elif isinstance(birthdate, str) and '.' in birthdate:
-            parts = birthdate.split('.')
-            if len(parts) == 3:
-                day, month, year = parts
-                birthdate = f"{year}-{month}-{day}"
-        
-        # Map document type
-        doc_type = self.map_document_type(raw_patient.get('documenttypes'))
-        
-        # Normalize document number
-        doc_number = self.normalize_document_number(raw_patient.get('document_number'))
-        
-        # Build standardized patient record
-        return {
-            "hisnumber": raw_patient.get('hisnumber'),
-            "source": 2,  # Инфоклиника
-            "businessunit": raw_patient.get('businessunit') or 2,
-            "lastname": raw_patient.get('lastname'),
-            "name": raw_patient.get('name'),
-            "surname": raw_patient.get('surname'),
-            "birthdate": birthdate,
-            "documenttypes": doc_type,
-            "document_number": doc_number,
-            "email": raw_patient.get('email'),
-            "telephone": raw_patient.get('telephone'),
-            "his_password": raw_patient.get('his_password')
-        }
+        try:
+            # Format birthdate
+            birthdate = raw_patient.get('birthdate')
+            if isinstance(birthdate, datetime):
+                birthdate = birthdate.date().isoformat()
+            elif isinstance(birthdate, str) and '.' in birthdate:
+                parts = birthdate.split('.')
+                if len(parts) == 3:
+                    day, month, year = parts
+                    birthdate = f"{year}-{month}-{day}"
+            
+            # Map document type
+            doc_type = self.map_document_type(raw_patient.get('documenttypes'))
+            
+            # Normalize document number
+            doc_number = self.normalize_document_number(raw_patient.get('document_number'))
+            
+            # Build standardized patient record
+            return {
+                    "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                    "source": raw_patient.get('source', 2),  # Инфоклиника = 2
+                    "businessunit": raw_patient.get('businessunit', 2),  # Default businessunit for Инфоклиника
+                    "lastname": raw_patient.get('lastname'),
+                    "name": raw_patient.get('name'),
+                    "surname": raw_patient.get('surname'),
+                    "birthdate": birthdate,
+                    "documenttypes": doc_type,
+                    "document_number": document_number,
+                    "email": raw_patient.get('email'),
+                    "telephone": telephone,
+                    "his_password": raw_patient.get('his_password')
+                }
+        except Exception as e:
+            self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
+            # Return a minimal record with the hisnumber and source to maintain data flow
+            return {
+                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                "source": raw_patient.get('source', 2),
+                "businessunit": raw_patient.get('businessunit', 2),
+                "documenttypes": 17,  # Default to "Иные документы" for error cases
+                "lastname": raw_patient.get('lastname'),
+                "name": raw_patient.get('name'),
+                "surname": raw_patient.get('surname')
+            }

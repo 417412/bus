@@ -9,44 +9,40 @@ class PostgresRepository:
         self.connector = connector
         self.logger = logging.getLogger(__name__)
     
-    def insert_patient(self, patient: Dict[str, Any]) -> bool:
+    def insert_patient(self, patient_data: Dict[str, Any]) -> bool:
         """
-        Insert a patient record into PostgreSQL.
+        Insert a patient record into the patientsdet table.
         
         Args:
-            patient: Patient record to insert
+            patient_data: Dictionary containing patient data
             
         Returns:
-            True if successful, False otherwise
+            True if insertion was successful, False otherwise
         """
-        if not self.connector.connection:
-            self.logger.error("Not connected to PostgreSQL")
-            return False
-            
         try:
+            # Ensure hisnumber is a string
+            patient_data = patient_data.copy()  # Don't modify original
+            patient_data['hisnumber'] = str(patient_data.get('hisnumber', ''))
+            
             cursor = self.connector.connection.cursor()
             cursor.execute("""
-            INSERT INTO patientsdet (
-                hisnumber, source, businessunit, lastname, name, surname, birthdate,
-                documenttypes, document_number, email, telephone, his_password
-            ) VALUES (
-                %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
-                %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
-                %(email)s, %(telephone)s, %(his_password)s
-            )
-            RETURNING id
-            """, patient)
+                INSERT INTO patientsdet (
+                    hisnumber, source, businessunit, lastname, name, surname, birthdate,
+                    documenttypes, document_number, email, telephone, his_password
+                ) VALUES (
+                    %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
+                    %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
+                    %(email)s, %(telephone)s, %(his_password)s
+                )
+            """, patient_data)
             
-            inserted_id = cursor.fetchone()[0]
             self.connector.connection.commit()
             cursor.close()
-            
-            self.logger.info(f"Patient inserted with ID: {inserted_id}")
             return True
+            
         except Exception as e:
-            self.logger.error(f"Error inserting patient: {str(e)}")
-            if self.connector.connection:
-                self.connector.connection.rollback()
+            self.logger.error(f"Error inserting patient {patient_data.get('hisnumber')}: {e}")
+            self.connector.connection.rollback()
             return False
     
     def get_patient_by_hisnumber(self, hisnumber: str, source: int) -> Optional[Dict[str, Any]]:
@@ -89,104 +85,78 @@ class PostgresRepository:
             self.logger.error(f"Error getting patient: {str(e)}")
             return None
 
-    def upsert_patient(self, patient: Dict[str, Any]) -> bool:
+    def upsert_patient(self, patient_data: Dict[str, Any]) -> bool:
         """
-        Update an existing patient or insert a new one if it doesn't exist.
-
+        Insert or update a patient record in the patientsdet table.
+        
         Args:
-            patient: Patient data to upsert
-
+            patient_data: Dictionary containing patient data
+            
         Returns:
-            True if successful, False otherwise
+            True if operation was successful, False otherwise
         """
         try:
-            hisnumber = patient.get('hisnumber')
-            source = patient.get('source')
-
-            if not hisnumber or not source:
-                self.logger.error("Missing hisnumber or source in patient data")
-                return False
-
-            # Check if patient exists
+            # Ensure hisnumber is a string
+            patient_data = patient_data.copy()  # Don't modify original
+            patient_data['hisnumber'] = str(patient_data.get('hisnumber', ''))
+            
             cursor = self.connector.connection.cursor()
             cursor.execute("""
-                SELECT id FROM patientsdet
-                WHERE hisnumber = '%s' AND source = %s
-            """, (hisnumber, source))
-
-            result = cursor.fetchone()
-
-            if result:
-                # Patient exists, update
-                patient_id = result[0]
-
-                # Build SET clause and parameters
-                set_clauses = []
-                params = {}
-
-                for key, value in patient.items():
-                    if key not in ('hisnumber', 'source'):  # Don't update primary keys
-                        set_clauses.append(f"{key} = %({key})s")
-                        params[key] = value
-
-                params['id'] = patient_id
-
-                # Execute update
-                if set_clauses:
-                    update_sql = f"""
-                        UPDATE patientsdet
-                        SET {', '.join(set_clauses)}
-                        WHERE id = %(id)s
-                    """
-                    cursor.execute(update_sql, params)
-                    self.connector.connection.commit()
-                    self.logger.info(f"Updated patient: {hisnumber} (source: {source})")
-                    return True
-                else:
-                    self.logger.warning(f"No fields to update for patient: {hisnumber}")
-                    return False
-            else:
-                # Patient doesn't exist, insert
-                return self.insert_patient(patient)
-
+                INSERT INTO patientsdet (
+                    hisnumber, source, businessunit, lastname, name, surname, birthdate,
+                    documenttypes, document_number, email, telephone, his_password
+                ) VALUES (
+                    %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
+                    %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
+                    %(email)s, %(telephone)s, %(his_password)s
+                )
+                ON CONFLICT (hisnumber, source) 
+                DO UPDATE SET
+                    businessunit = EXCLUDED.businessunit,
+                    lastname = EXCLUDED.lastname,
+                    name = EXCLUDED.name,
+                    surname = EXCLUDED.surname,
+                    birthdate = EXCLUDED.birthdate,
+                    documenttypes = EXCLUDED.documenttypes,
+                    document_number = EXCLUDED.document_number,
+                    email = EXCLUDED.email,
+                    telephone = EXCLUDED.telephone,
+                    his_password = EXCLUDED.his_password
+            """, patient_data)
+            
+            self.connector.connection.commit()
+            cursor.close()
+            return True
+            
         except Exception as e:
-            self.logger.error(f"Error upserting patient: {str(e)}")
-            if self.connector.connection:
-                self.connector.connection.rollback()
+            self.logger.error(f"Error upserting patient {patient_data.get('hisnumber')}: {e}")
+            self.connector.connection.rollback()
             return False
 
     def mark_patient_deleted(self, hisnumber: str, source: int) -> bool:
         """
-        Mark a patient as deleted.
-
-        Note: In medical systems, we typically don't delete patient records,
-        but instead mark them as inactive or archived.
-
+        Mark a patient as deleted (for future implementation).
+        
         Args:
-            hisnumber: HIS number of the patient
+            hisnumber: Patient's HIS number
             source: Source system ID
-
+            
         Returns:
-            True if successful, False otherwise
+            True if operation was successful, False otherwise
         """
         try:
-            # Check if we need to add a 'deleted' or 'active' column to patientsdet
-            # For now, we'll log a message and return success
-            self.logger.info(f"Patient deletion requested for {hisnumber} (source: {source})")
-            self.logger.warning("Patient deletion not implemented - patients are retained for medical records")
+            # Ensure hisnumber is a string
+            hisnumber_str = str(hisnumber) if hisnumber is not None else None
+            
+            cursor = self.connector.connection.cursor()
+            # For now, we'll just log the deletion request
+            # In the future, this could set a deleted flag or move to an archive table
+            self.logger.info(f"Delete request for patient {hisnumber_str} from source {source}")
+            cursor.close()
             return True
-
-            # If implementing actual deletion behavior in the future:
-            # cursor = self.connector.connection.cursor()
-            # cursor.execute("""
-            #    UPDATE patientsdet SET active = FALSE WHERE hisnumber = %s AND source = %s
-            # """, (hisnumber, source))
-            # self.connector.connection.commit()
-            # return cursor.rowcount > 0
+            
         except Exception as e:
-            self.logger.error(f"Error marking patient as deleted: {str(e)}")
-            if self.connector.connection:
-                self.connector.connection.rollback()
+            self.logger.error(f"Error marking patient {hisnumber} as deleted: {e}")
             return False
         
     def get_patient_count_by_source(self, source_id: int) -> int:
@@ -233,12 +203,16 @@ class PostgresRepository:
         """
         try:
             cursor = self.connector.connection.cursor()
+            
+            # Convert hisnumber to string to match VARCHAR column type
+            hisnumber_str = str(hisnumber) if hisnumber is not None else None
+            
             cursor.execute("""
                 SELECT EXISTS(
                     SELECT 1 FROM patientsdet 
                     WHERE hisnumber = %s AND source = %s
                 )
-            """, (hisnumber, source))  # Use parameterized query instead of string formatting
+            """, (hisnumber_str, source))
             
             result = cursor.fetchone()[0]
             cursor.close()
@@ -247,3 +221,32 @@ class PostgresRepository:
         except Exception as e:
             self.logger.error(f"Error checking if patient {hisnumber} exists: {e}")
             return False
+    
+    def get_total_patient_count(self, source: int = None) -> int:
+        """
+        Get the total number of patients in the patientsdet table.
+        
+        Args:
+            source: Optional source ID to filter by (1=qMS, 2=Инфоклиника)
+        
+        Returns:
+            Total patient count for the specified source, or all patients if source=None
+        """
+        try:
+            cursor = self.connector.connection.cursor()
+            
+            if source is not None:
+                cursor.execute("SELECT COUNT(*) FROM patientsdet WHERE source = %s", (source,))
+                count = cursor.fetchone()[0]
+                self.logger.info(f"Total patient count in PostgreSQL for source {source}: {count}")
+            else:
+                cursor.execute("SELECT COUNT(*) FROM patientsdet")
+                count = cursor.fetchone()[0]
+                self.logger.info(f"Total patient count in PostgreSQL (all sources): {count}")
+            
+            cursor.close()
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"Error getting total patient count: {e}")
+            return 0
