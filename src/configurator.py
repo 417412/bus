@@ -7,11 +7,13 @@ Allows updating settings.py with new configuration values.
 import argparse
 import json
 import sys
+import os
 from pathlib import Path
 from typing import Dict, Any
 
-# Add the project root to path
-sys.path.append(str(Path(__file__).parent.parent))
+# Add the parent directory to the path so Python can find the modules
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
 
 from src.utils.config_manager import ConfigManager
 from src.config.settings import get_config_info, reload_config, setup_logger
@@ -417,8 +419,10 @@ def main():
         # Create backup if requested
         if args.backup:
             backup_file = config_manager.settings_file.with_suffix('.py.backup')
-            config_manager.settings_file.copy(backup_file)
-            print(f"Backup created: {backup_file}")
+            if config_manager.settings_file.exists():
+                import shutil
+                shutil.copy2(config_manager.settings_file, backup_file)
+                print(f"Backup created: {backup_file}")
         
         updated = False
         

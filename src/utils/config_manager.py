@@ -2,11 +2,18 @@
 Configuration management utilities for updating settings.py
 """
 
+import os
+import sys
 import re
 import ast
 import json
 from pathlib import Path
 from typing import Dict, Any, Union
+
+# Add the parent directory to the path so Python can find the modules
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(parent_dir)
+
 from src.config.settings import get_config_info
 
 class ConfigManager:
@@ -27,13 +34,15 @@ class ConfigManager:
         """Write content to the settings file."""
         # Create backup first
         backup_file = self.settings_file.with_suffix('.py.backup')
-        self.settings_file.rename(backup_file)
+        if self.settings_file.exists():
+            self.settings_file.rename(backup_file)
         
         try:
             self.settings_file.write_text(content, encoding='utf-8')
         except Exception as e:
-            # Restore backup on error
-            backup_file.rename(self.settings_file)
+            # Restore backup on error if it exists
+            if backup_file.exists():
+                backup_file.rename(self.settings_file)
             raise e
     
     def update_path_variable(self, var_name: str, new_path: str) -> None:
@@ -57,23 +66,34 @@ class ConfigManager:
         """Update a dictionary variable in settings.py"""
         content = self.read_settings()
         
-        # Find the variable assignment
-        pattern = rf'^({var_name}\s*=\s*)(\{{[^}}]*\}})$'
-        matches = re.search(pattern, content, flags=re.MULTILINE | re.DOTALL)
+        # Find the variable assignment - handle multiline dictionaries
+        # First try to find the start of the variable
+        start_pattern = rf'^({var_name}\s*=\s*\{{)'
+        start_match = re.search(start_pattern, content, flags=re.MULTILINE)
         
-        if not matches:
-            # Try multiline dictionary pattern
-            pattern = rf'^({var_name}\s*=\s*\{{)(.*?)(^\}})$'
-            matches = re.search(pattern, content, flags=re.MULTILINE | re.DOTALL)
-        
-        if not matches:
+        if not start_match:
             raise ValueError(f"Dictionary variable {var_name} not found in settings file")
+        
+        # Find the matching closing brace
+        start_pos = start_match.start()
+        brace_count = 0
+        current_pos = start_match.end() - 1  # Position of opening brace
+        end_pos = None
+        
+        for i, char in enumerate(content[current_pos:], current_pos):
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = i + 1
+                    break
+        
+        if end_pos is None:
+            raise ValueError(f"Could not find closing brace for {var_name}")
         
         # Format the new dictionary nicely
         formatted_dict = self._format_dict(new_dict, indent=4)
-        
-        start_pos = matches.start()
-        end_pos = matches.end()
         
         new_assignment = f"{var_name} = {formatted_dict}"
         
