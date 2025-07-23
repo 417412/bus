@@ -1,0 +1,10 @@
+2025-07-23 18:21:16,400 - debug_yottadb - INFO - Testing YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-23 18:21:16,400 - debug_yottadb - INFO - Timeouts: connect=300s, read=300s
+2025-07-23 18:21:16,400 - debug_yottadb - INFO - Starting API call...
+2025-07-23 18:23:24,909 - debug_yottadb - INFO - API call completed in 128.5 seconds
+2025-07-23 18:23:24,909 - debug_yottadb - INFO - Status code: 200
+2025-07-23 18:23:24,964 - debug_yottadb - INFO - Content length: 35693781 characters
+2025-07-23 18:23:25,221 - debug_yottadb - INFO - Number of lines: 410000
+2025-07-23 18:23:25,221 - debug_yottadb - INFO - Line 1: 5/A21|Махова|Анна|Александровна|19871230||||||
+2025-07-23 18:23:25,221 - debug_yottadb - INFO - Line 2: 7/A21|Егорова|Ольга|Николаевна|19800130||||||
+2025-07-23 18:23:25,221 - debug_yottadb - INFO - Line 3: 8/A21|Родин|Александр|Сергеевич|19720411||||||

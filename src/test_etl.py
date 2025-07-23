@@ -13,7 +13,7 @@ import random
 from datetime import datetime
 
 # Add the parent directory to the path so Python can find the modules
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 # Import configuration
@@ -101,74 +101,119 @@ def test_firebird_connection():
 
 
 def test_yottadb_connection():
-    """Test YottaDB connection."""
+    """Test YottaDB connection using ping/socket test."""
     logger.info("Testing YottaDB connection...")
-    logger.info("WARNING: This test will take 2-3 minutes due to YottaDB API response time")
     
     yottadb_connector = YottaDBConnector(DATABASE_CONFIG["YottaDB"])
     
-    # First test basic connectivity (quick test)
+    # Test basic connectivity (quick ping/socket test)
     if yottadb_connector.connect():
-        logger.info("YottaDB basic connection test successful")
-        
-        # Now test through repository with a limited fetch
-        try:
-            yottadb_repo = YottaDBRepository(yottadb_connector)
-            
-            # Get just a small batch to test functionality without full API call
-            logger.info("Testing YottaDB repository with small batch...")
-            patients = yottadb_repo.get_patients(batch_size=2)
-            
-            if patients:
-                logger.info(f"Retrieved {len(patients)} patients from YottaDB")
-                
-                # Display sample data
-                for i, patient in enumerate(patients):
-                    logger.info(f"Patient {i+1}: {patient.get('lastname', 'Unknown')} {patient.get('name', 'Unknown')} (ID: {patient.get('hisnumber', 'Unknown')})")
-            else:
-                logger.warning("No patients retrieved from YottaDB (this might be normal if no data or API issues)")
-        
-        except Exception as e:
-            logger.error(f"Error testing YottaDB repository: {str(e)}")
-        
+        logger.info("YottaDB connectivity test successful")
         yottadb_connector.disconnect()
         return True
     else:
-        logger.error("YottaDB connection failed")
+        logger.error("YottaDB connectivity test failed")
         return False
 
 
-def test_yottadb_full_fetch():
-    """Test YottaDB full data fetch (separate test due to time)."""
-    logger.info("Testing YottaDB full data fetch...")
-    logger.info("WARNING: This will take 2-3 minutes!")
+def test_yottadb_etl():
+    """Test YottaDB ETL process with full API fetch and sample processing."""
+    logger.info("Testing YottaDB ETL process...")
+    logger.info("WARNING: This will fetch all data from YottaDB API (takes 2-3 minutes)")
+    
+    # Ask user confirmation
+    response = input("Do you want to proceed with YottaDB ETL test? (y/N): ")
+    if response.lower() not in ['y', 'yes']:
+        logger.info("YottaDB ETL test skipped by user")
+        return None
     
     yottadb_connector = YottaDBConnector(DATABASE_CONFIG["YottaDB"])
+    pg_connector = PostgresConnector(DATABASE_CONFIG["PostgreSQL"])
     
-    if yottadb_connector.connect():
-        try:
-            # Test full fetch
-            patients = yottadb_connector.fetch_all_patients()
-            logger.info(f"YottaDB full fetch returned {len(patients)} patients")
-            
-            if patients:
-                # Show some sample data
-                for i, patient in enumerate(patients[:3]):
-                    logger.info(f"Sample patient {i+1}: {patient.get('lastname', 'Unknown')} {patient.get('name', 'Unknown')} (ID: {patient.get('hisnumber', 'Unknown')})")
-                
-                return True
-            else:
-                logger.warning("No patients returned from full fetch")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error during full fetch test: {str(e)}")
-            return False
-        finally:
-            yottadb_connector.disconnect()
-    else:
-        logger.error("YottaDB connection failed")
+    if not yottadb_connector.connect():
+        logger.error("Failed to connect to YottaDB")
         return False
+        
+    if not pg_connector.connect():
+        logger.error("Failed to connect to PostgreSQL")
+        return False
+    
+    try:
+        # Create repositories
+        yottadb_repo = YottaDBRepository(yottadb_connector)
+        pg_repo = PostgresRepository(pg_connector)
+        
+        # Create ETL service
+        etl_service = ETLService(yottadb_repo, pg_repo)
+        
+        logger.info("Fetching all patients from YottaDB API...")
+        
+        # Get all patients from YottaDB (this triggers the full API call)
+        all_patients = yottadb_repo._get_all_patients_cached()
+        
+        if not all_patients:
+            logger.error("No patients retrieved from YottaDB")
+            return False
+        
+        logger.info(f"Retrieved {len(all_patients)} patients from YottaDB")
+        
+        # Select 10 random patients for testing ETL
+        test_batch_size = min(10, len(all_patients))
+        test_patients = random.sample(all_patients, test_batch_size)
+        
+        logger.info(f"Testing ETL process with {test_batch_size} random patients...")
+        
+        # Process the test batch through ETL
+        success_count = 0
+        error_count = 0
+        
+        for i, raw_patient in enumerate(test_patients, 1):
+            try:
+                # Transform the patient data
+                transformed_patient = etl_service.transformer.transform_patient(raw_patient)
+                
+                logger.info(f"Processing patient {i}/{test_batch_size}: {transformed_patient.get('lastname', 'Unknown')} {transformed_patient.get('name', 'Unknown')} (ID: {transformed_patient.get('hisnumber', 'Unknown')})")
+                
+                # Check if patient already exists
+                hisnumber = transformed_patient.get('hisnumber')
+                source = transformed_patient.get('source')
+                
+                if pg_repo.patient_exists(hisnumber, source):
+                    logger.info(f"  Patient {hisnumber} already exists, using upsert")
+                    if pg_repo.upsert_patient(transformed_patient):
+                        success_count += 1
+                        logger.info(f"  ✓ Patient {hisnumber} updated successfully")
+                    else:
+                        error_count += 1
+                        logger.error(f"  ✗ Failed to update patient {hisnumber}")
+                else:
+                    if pg_repo.insert_patient(transformed_patient):
+                        success_count += 1
+                        logger.info(f"  ✓ Patient {hisnumber} inserted successfully")
+                    else:
+                        error_count += 1
+                        logger.error(f"  ✗ Failed to insert patient {hisnumber}")
+                        
+            except Exception as e:
+                error_count += 1
+                logger.error(f"  ✗ Error processing patient {i}: {str(e)}")
+        
+        logger.info(f"YottaDB ETL test completed: {success_count} successful, {error_count} errors")
+        
+        # Show some statistics
+        logger.info(f"Total patients in YottaDB: {len(all_patients)}")
+        logger.info(f"Test batch processed: {test_batch_size}")
+        logger.info(f"Success rate: {success_count/test_batch_size*100:.1f}%")
+        
+        return success_count > 0
+        
+    except Exception as e:
+        logger.error(f"Error during YottaDB ETL test: {str(e)}")
+        return False
+    finally:
+        # Disconnect
+        yottadb_connector.disconnect()
+        pg_connector.disconnect()
 
 
 def test_postgres_schema():
@@ -203,7 +248,7 @@ def test_postgres_schema():
                 # Check if we have reference data in the tables
                 tables_to_check = {
                     "hislist": "HIS systems",
-                    "businessunits": "business units",
+                    "businessunits": "business units", 
                     "documenttypes": "document types"
                 }
                 
@@ -242,8 +287,10 @@ def test_document_type_handling():
         # Create repository
         pg_repo = PostgresRepository(pg_connector)
         
-        # Generate test patients with different document types
+        # Generate test patients with different document types for BOTH sources
         test_patients = []
+        
+        # Test with qMS patients (source=1)
         for doc_type in [1, 3, 5, 10, 14, 17]:  # Sample of document types
             # Generate appropriate document number based on type
             if doc_type == 1:  # Russian passport - 10 digits
@@ -255,22 +302,48 @@ def test_document_type_handling():
             else:  # Other documents - 8 digits
                 doc_number = random.randint(10000000, 99999999)
             
-            # Create a patient with this document
-            patient = {
-                "hisnumber": f"DOCTEST_{doc_type}_{random.randint(1000, 9999)}",
+            # Create a qMS patient
+            qms_patient = {
+                "hisnumber": f"QMS_DOCTEST_{doc_type}_{random.randint(1000, 9999)}",
                 "source": 1,  # qMS
                 "businessunit": 1,
-                "lastname": f"Документов{doc_type}",
+                "lastname": f"ТестQMS{doc_type}",
                 "name": "Тест", 
-                "surname": "Документович",
+                "surname": "qMSович",
                 "birthdate": "1990-01-01",
                 "documenttypes": doc_type,
                 "document_number": doc_number,
-                "email": f"doc{doc_type}@example.com",
-                "telephone": "+7 (999) 999-99-99",
-                "his_password": "testpass"
+                "email": f"qms_doc{doc_type}@example.com",
+                "telephone": "79991234567",
+                "his_password": None  # qMS doesn't have passwords via API
             }
-            test_patients.append(patient)
+            test_patients.append(qms_patient)
+            
+            # Create an Infoclinica patient with different document number
+            if doc_type == 1:  # Russian passport - 10 digits
+                doc_number2 = random.randint(1000000000, 9999999999)
+            elif doc_type in (3, 10):  # Foreign passports - 9 digits
+                doc_number2 = random.randint(100000000, 999999999)
+            elif doc_type == 5:  # Birth certificate - 12 digits
+                doc_number2 = random.randint(100000000000, 999999999999)
+            else:  # Other documents - 8 digits
+                doc_number2 = random.randint(10000000, 99999999)
+            
+            infoclinica_patient = {
+                "hisnumber": f"IC_DOCTEST_{doc_type}_{random.randint(1000, 9999)}",
+                "source": 2,  # Инфоклиника
+                "businessunit": 2,  # Медскан
+                "lastname": f"ТестIC{doc_type}",
+                "name": "Тест", 
+                "surname": "Инфоклиникович",
+                "birthdate": "1990-01-01",
+                "documenttypes": doc_type,
+                "document_number": doc_number2,
+                "email": f"ic_doc{doc_type}@example.com",
+                "telephone": "79997654321",
+                "his_password": "testpass123"  # Infoclinica has passwords
+            }
+            test_patients.append(infoclinica_patient)
         
         # Insert the test patients
         inserted_count = 0
@@ -278,7 +351,8 @@ def test_document_type_handling():
             if pg_repo.insert_patient(patient):
                 inserted_count += 1
                 doc_type_name = DOCUMENT_TYPES.get(patient["documenttypes"], "Unknown")
-                logger.info(f"Inserted patient with {doc_type_name} (ID: {patient['documenttypes']}), number: {patient['document_number']}")
+                source_name = "qMS" if patient["source"] == 1 else "Инфоклиника"
+                logger.info(f"Inserted {source_name} patient with {doc_type_name} (ID: {patient['documenttypes']}), number: {patient['document_number']}")
         
         logger.info(f"Successfully inserted {inserted_count} out of {len(test_patients)} test patients with different document types")
         
@@ -291,9 +365,9 @@ def test_document_type_handling():
         return False
 
 
-def test_etl_process():
-    """Test the ETL process using the new architecture."""
-    logger.info("Testing ETL process with the repository-transformer architecture...")
+def test_firebird_etl():
+    """Test the Firebird ETL process using the new architecture."""
+    logger.info("Testing Firebird ETL process...")
     
     # Create connectors
     fb_connector = FirebirdConnector(DATABASE_CONFIG["Firebird"])
@@ -318,21 +392,21 @@ def test_etl_process():
         
         # Process a batch
         batch_size = 10  # Small batch for testing
-        logger.info(f"Processing {batch_size} patients through ETL")
+        logger.info(f"Processing {batch_size} patients through Firebird ETL")
         success_count = etl_service.process_batch(batch_size=batch_size)
         
-        logger.info(f"ETL processed {success_count} patients successfully")
+        logger.info(f"Firebird ETL processed {success_count} patients successfully")
         
         # Check results
         if success_count > 0:
-            logger.info("ETL process test successful")
+            logger.info("Firebird ETL process test successful")
             return True
         else:
-            logger.warning("ETL process test completed but no records were processed")
+            logger.warning("Firebird ETL process test completed but no records were processed")
             return False
             
     except Exception as e:
-        logger.error(f"Error during ETL test: {str(e)}")
+        logger.error(f"Error during Firebird ETL test: {str(e)}")
         return False
     finally:
         # Disconnect
@@ -359,35 +433,33 @@ def main():
         logger.warning("Skipping document type handling test due to connection or schema issues")
         doc_type_result = False
     
-    # Test ETL process with new architecture
+    # Test Firebird ETL process
     if pg_result and fb_result and schema_result:
-        etl_result = test_etl_process()
+        fb_etl_result = test_firebird_etl()
     else:
-        logger.warning("Skipping ETL process test due to connection or schema issues")
-        etl_result = False
+        logger.warning("Skipping Firebird ETL test due to connection or schema issues")
+        fb_etl_result = False
     
-    # Ask if user wants to test YottaDB full fetch (time-consuming)
-    if ydb_result:
-        logger.info("\nYottaDB basic connectivity test passed.")
-        response = input("Do you want to test YottaDB full data fetch? This takes 2-3 minutes (y/N): ")
-        if response.lower() in ['y', 'yes']:
-            ydb_full_result = test_yottadb_full_fetch()
-        else:
-            ydb_full_result = None
-            logger.info("Skipping YottaDB full fetch test")
+    # Test YottaDB ETL process (optional - user choice due to time)
+    if pg_result and ydb_result and schema_result:
+        ydb_etl_result = test_yottadb_etl()
     else:
-        ydb_full_result = False
+        logger.warning("Skipping YottaDB ETL test due to connection or schema issues")
+        ydb_etl_result = False
     
     # Print summary
     logger.info("\nTest Results Summary:")
     logger.info(f"PostgreSQL Connection: {'✓' if pg_result else '✗'}")
     logger.info(f"Firebird Connection: {'✓' if fb_result else '✗'}")
-    logger.info(f"YottaDB Basic Connection: {'✓' if ydb_result else '✗'}")
-    if ydb_full_result is not None:
-        logger.info(f"YottaDB Full Fetch: {'✓' if ydb_full_result else '✗'}")
+    logger.info(f"YottaDB Connection: {'✓' if ydb_result else '✗'}")
     logger.info(f"PostgreSQL Schema: {'✓' if schema_result else '✗'}")
     logger.info(f"Document Type Handling: {'✓' if doc_type_result else '✗'}")
-    logger.info(f"ETL Process: {'✓' if etl_result else '✗'}")
+    logger.info(f"Firebird ETL Process: {'✓' if fb_etl_result else '✗'}")
+    
+    if ydb_etl_result is not None:
+        logger.info(f"YottaDB ETL Process: {'✓' if ydb_etl_result else '✗'}")
+    else:
+        logger.info("YottaDB ETL Process: Skipped")
     
     logger.info("\nTests completed.")
 

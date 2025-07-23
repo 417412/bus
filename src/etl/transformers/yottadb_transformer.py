@@ -183,9 +183,12 @@ class YottaDBTransformer:
             # Use login_email as primary email, fallback to email
             email = raw_patient.get('login_email') or raw_patient.get('email')
             
+            # Keep the full hisnumber as provided by the API (don't extract just the numeric part)
+            hisnumber = raw_patient.get('hisnumber', '')
+            
             # Build standardized patient record
             return {
-                "hisnumber": raw_patient.get('hisnumber'),
+                "hisnumber": hisnumber,  # Keep full hisnumber like "41449/A22"
                 "source": raw_patient.get('source', 1),  # qMS = 1
                 "businessunit": raw_patient.get('businessunit', 1),  # Default businessunit for qMS
                 "lastname": raw_patient.get('lastname'),

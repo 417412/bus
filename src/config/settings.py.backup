@@ -20,28 +20,28 @@ STATE_DIR = BASE_DIR / "state"
 # Database Configurations
 DATABASE_CONFIG = {
     "PostgreSQL": {
-        "host": "192.168.161.140",
+        "host": "localhost",
         "port": 5432,
         "database": "medical_system",
         "user": "medapp_user",
-        "password": "the2zG6tbewA3",
-},
+        "password": "the2zG6tbewA3"
+    },
     "Firebird": {
         "host": "192.168.160.168",
         "port": 3050,
-        "database": "099-1",
+        "database": "099-1",            
         "user": "SYSDBA",
         "password": "masterkey",
         "charset": "UTF-8",
-        "debug": False,
-},
+        "debug": False
+    },
     "YottaDB": {
         "api_url": "http://192.168.156.43/cgi-bin/qms_export_pat",
         "timeout": 300,
         "connect_timeout": 300,
         "max_retries": 2,
-        "delimiter": "|",
-},
+        "delimiter": "|"
+    }
 }
 
 # Logging Configuration

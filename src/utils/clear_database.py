@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
         help="Keep reference data in tables like hislist, businessunits, and documenttypes"
     )
     parser.add_argument(
+        "--reinitialize",
+        action="store_true",
+        help="Drop all tables and recreate the entire database schema with triggers"
+    )
+    parser.add_argument(
         "--database", 
         type=str, 
         default=DATABASE_CONFIG["PostgreSQL"]["database"],
@@ -188,6 +193,135 @@ def get_truncation_order(dependencies: Dict[str, List[str]]) -> List[str]:
     return truncation_order[::-1]
 
 
+def drop_all_tables(conn: psycopg2.extensions.connection, args: argparse.Namespace) -> None:
+    """Drop all tables and our custom functions in the database."""
+    cursor = conn.cursor()
+    
+    if args.dry_run:
+        logger.info("Would drop all tables and custom functions")
+        cursor.close()
+        return
+    
+    logger.info("Dropping all tables and custom functions...")
+    
+    # First, drop our custom triggers
+    custom_triggers = [
+        ('trg_process_new_patient', 'patientsdet'),
+        ('trg_update_patient', 'patientsdet')
+    ]
+    
+    for trigger_name, table_name in custom_triggers:
+        try:
+            logger.info(f"Dropping trigger: {trigger_name}")
+            cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table_name}")
+        except Exception as e:
+            logger.warning(f"Could not drop trigger {trigger_name}: {str(e)}")
+    
+    # Then drop our custom functions
+    custom_functions = [
+        'process_new_patient',
+        'update_patient_from_patientsdet'
+    ]
+    
+    for func in custom_functions:
+        try:
+            logger.info(f"Dropping function: {func}")
+            cursor.execute(f"DROP FUNCTION IF EXISTS {func}() CASCADE")
+        except Exception as e:
+            logger.warning(f"Could not drop function {func}: {str(e)}")
+    
+    # Get all user tables (excluding system tables)
+    cursor.execute("""
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_type = 'BASE TABLE'
+        AND table_name NOT LIKE 'pg_%'
+        AND table_name NOT LIKE 'sql_%'
+    """)
+    
+    tables = [row[0] for row in cursor.fetchall()]
+    
+    # Drop all tables with CASCADE to handle dependencies
+    logger.info(f"Dropping {len(tables)} tables...")
+    for table in tables:
+        try:
+            logger.info(f"Dropping table: {table}")
+            cursor.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        except Exception as e:
+            logger.error(f"Error dropping table {table}: {str(e)}")
+            conn.rollback()
+            continue
+    
+    conn.commit()
+    cursor.close()
+
+
+def execute_sql_file(conn: psycopg2.extensions.connection, file_path: str, args: argparse.Namespace) -> bool:
+    """Execute SQL commands from a file."""
+    if not os.path.exists(file_path):
+        logger.error(f"SQL file not found: {file_path}")
+        return False
+    
+    if args.dry_run:
+        logger.info(f"Would execute SQL file: {file_path}")
+        return True
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            sql_content = f.read()
+        
+        cursor = conn.cursor()
+        
+        # For SQL files with complex functions, execute the entire content at once
+        # This handles dollar-quoted strings and complex function definitions properly
+        try:
+            logger.info(f"Executing SQL file: {file_path}")
+            cursor.execute(sql_content)
+            conn.commit()
+            cursor.close()
+            logger.info(f"Successfully executed SQL file: {file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error executing SQL file {file_path}: {str(e)}")
+            conn.rollback()
+            cursor.close()
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error reading SQL file {file_path}: {str(e)}")
+        return False
+
+
+def reinitialize_database(conn: psycopg2.extensions.connection, args: argparse.Namespace) -> bool:
+    """Reinitialize the entire database schema."""
+    logger.info("Reinitializing database schema...")
+    
+    # Get the directory containing this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    
+    # Paths to SQL files
+    schema_file = os.path.join(project_root, 'schema', 'schema.sql')
+    trigger_file = os.path.join(project_root, 'triggers', 'matching_trigger.sql')
+    
+    # Execute schema file
+    logger.info("Creating database schema...")
+    if not execute_sql_file(conn, schema_file, args):
+        logger.error("Failed to create database schema")
+        return False
+    
+    # Execute trigger file
+    logger.info("Creating triggers...")
+    if not execute_sql_file(conn, trigger_file, args):
+        logger.error("Failed to create triggers")
+        return False
+    
+    logger.info("Database schema and triggers created successfully")
+    return True
+
+
 def truncate_tables(conn: psycopg2.extensions.connection, 
                     truncation_order: List[str], 
                     args: argparse.Namespace) -> None:
@@ -305,26 +439,45 @@ def main():
     """Main function."""
     args = parse_args()
     
-    logger.info("Starting database cleanup...")
+    # Validate arguments
+    if args.reinitialize and args.keep_reference_data:
+        logger.error("--reinitialize and --keep-reference-data cannot be used together")
+        return 1
+    
+    if args.reinitialize:
+        logger.info("Starting full database reinitialization...")
+    else:
+        logger.info("Starting database cleanup...")
     
     try:
         # Connect to the database
         conn = get_connection(args)
         logger.info("Connected to the database")
         
-        # Get tables and their dependencies
-        dependencies = get_tables_with_dependencies(conn)
-        logger.info(f"Found {len(dependencies)} tables")
-        
-        # Determine truncation order
-        truncation_order = get_truncation_order(dependencies)
-        logger.info(f"Truncation order: {', '.join(truncation_order)}")
-        
-        # Truncate tables
-        truncate_tables(conn, truncation_order, args)
-        
-        # Reinitialize reference data if needed
-        reinitialize_reference_data(conn, args)
+        if args.reinitialize:
+            # Full reinitialization: drop everything and recreate
+            drop_all_tables(conn, args)
+            
+            if not args.dry_run:
+                if not reinitialize_database(conn, args):
+                    logger.error("Failed to reinitialize database")
+                    return 1
+            
+        else:
+            # Regular cleanup: truncate tables
+            # Get tables and their dependencies
+            dependencies = get_tables_with_dependencies(conn)
+            logger.info(f"Found {len(dependencies)} tables")
+            
+            # Determine truncation order
+            truncation_order = get_truncation_order(dependencies)
+            logger.info(f"Truncation order: {', '.join(truncation_order)}")
+            
+            # Truncate tables
+            truncate_tables(conn, truncation_order, args)
+            
+            # Reinitialize reference data if needed
+            reinitialize_reference_data(conn, args)
         
         # Close connection
         conn.close()
@@ -332,10 +485,13 @@ def main():
         if args.dry_run:
             logger.info("Dry run completed. No changes were made.")
         else:
-            logger.info("Database cleanup completed successfully.")
+            if args.reinitialize:
+                logger.info("Database reinitialization completed successfully.")
+            else:
+                logger.info("Database cleanup completed successfully.")
         
     except Exception as e:
-        logger.error(f"Error during database cleanup: {str(e)}")
+        logger.error(f"Error during database operation: {str(e)}")
         return 1
     
     return 0

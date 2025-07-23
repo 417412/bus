@@ -13,6 +13,10 @@ BEGIN
     -- Get HIS name
     SELECT name INTO v_his_name FROM hislist WHERE id = NEW.source;
     
+    -- Debug logging to see what's happening
+    RAISE NOTICE 'Processing patient: hisnumber=%, source=%, his_name=%, document_number=%, document_type=%', 
+        NEW.hisnumber, NEW.source, v_his_name, NEW.document_number, NEW.documenttypes;
+    
     -- Look for existing patient with matching document if document is provided
     IF NEW.document_number IS NOT NULL AND NEW.documenttypes IS NOT NULL THEN
         -- Try to find matching patient by document type and number
@@ -24,8 +28,11 @@ BEGIN
         
         IF v_patient_uuid IS NOT NULL THEN
             -- Found match by document
+            RAISE NOTICE 'Found existing patient with UUID: %', v_patient_uuid;
+            
             -- Update patient record with HIS-specific data and handle conflicts
-            IF v_his_name = 'qMS' THEN
+            IF NEW.source = 1 THEN  -- qMS - use source ID directly instead of name comparison
+                RAISE NOTICE 'Updating qMS fields for existing patient';
                 UPDATE patients
                 SET 
                     -- Update HIS-specific fields
@@ -43,7 +50,8 @@ BEGIN
                     -- Set primary source if it's not set yet
                     primary_source = COALESCE(primary_source, NEW.source)
                 WHERE uuid = v_patient_uuid;
-            ELSIF v_his_name = 'Инфоклиника' THEN
+            ELSIF NEW.source = 2 THEN  -- Инфоклиника - use source ID directly
+                RAISE NOTICE 'Updating Infoclinica fields for existing patient';
                 UPDATE patients
                 SET 
                     -- Update HIS-specific fields
@@ -71,6 +79,8 @@ BEGIN
             );
         ELSE
             -- No match found, create new patient record
+            RAISE NOTICE 'Creating new patient with source: %', NEW.source;
+            
             INSERT INTO patients (
                 documenttypes, document_number,
                 lastname, name, surname, birthdate,
@@ -82,16 +92,18 @@ BEGIN
                 NEW.documenttypes, NEW.document_number,
                 NEW.lastname, NEW.name, NEW.surname, NEW.birthdate,
                 NEW.source,
-                CASE WHEN v_his_name = 'qMS' THEN NEW.hisnumber ELSE NULL END,
-                CASE WHEN v_his_name = 'qMS' THEN NEW.email ELSE NULL END,
-                CASE WHEN v_his_name = 'qMS' THEN NEW.telephone ELSE NULL END,
-                CASE WHEN v_his_name = 'qMS' THEN NEW.his_password ELSE NULL END,
-                CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.hisnumber ELSE NULL END,
-                CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.email ELSE NULL END,
-                CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.telephone ELSE NULL END,
-                CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.his_password ELSE NULL END
+                CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,       -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,           -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,       -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,    -- qMS
+                CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,       -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,           -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,       -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END     -- Инфоклиника
             )
             RETURNING uuid INTO v_patient_uuid;
+            
+            RAISE NOTICE 'Created new patient with UUID: %', v_patient_uuid;
             
             -- Log the new patient creation
             INSERT INTO patient_matching_log (
@@ -102,6 +114,8 @@ BEGIN
         END IF;
     ELSE
         -- No document available, always create a new record
+        RAISE NOTICE 'Creating new patient without document, source: %', NEW.source;
+        
         INSERT INTO patients (
             documenttypes, document_number,
             lastname, name, surname, birthdate,
@@ -113,16 +127,18 @@ BEGIN
             NEW.documenttypes, NEW.document_number,
             NEW.lastname, NEW.name, NEW.surname, NEW.birthdate,
             NEW.source,
-            CASE WHEN v_his_name = 'qMS' THEN NEW.hisnumber ELSE NULL END,
-            CASE WHEN v_his_name = 'qMS' THEN NEW.email ELSE NULL END,
-            CASE WHEN v_his_name = 'qMS' THEN NEW.telephone ELSE NULL END,
-            CASE WHEN v_his_name = 'qMS' THEN NEW.his_password ELSE NULL END,
-            CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.hisnumber ELSE NULL END,
-            CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.email ELSE NULL END,
-            CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.telephone ELSE NULL END,
-            CASE WHEN v_his_name = 'Инфоклиника' THEN NEW.his_password ELSE NULL END
+            CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,       -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,           -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,       -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,    -- qMS
+            CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,       -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,           -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,       -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END     -- Инфоклиника
         )
         RETURNING uuid INTO v_patient_uuid;
+        
+        RAISE NOTICE 'Created new patient without document, UUID: %', v_patient_uuid;
         
         -- Log the new patient creation
         INSERT INTO patient_matching_log (
@@ -178,7 +194,7 @@ BEGIN
             -- We need to merge the records
             
             -- First, update the HIS-specific information based on source
-            IF v_his_name = 'qMS' THEN
+            IF NEW.source = 1 THEN  -- qMS
                 UPDATE patients
                 SET 
                     hisnumber_qms = NEW.hisnumber,
@@ -197,7 +213,7 @@ BEGIN
                 FROM patients p2
                 WHERE p1.uuid = v_other_patient_uuid AND p2.uuid = OLD.uuid;
                 
-            ELSIF v_his_name = 'Инфоклиника' THEN
+            ELSIF NEW.source = 2 THEN  -- Инфоклиника
                 UPDATE patients
                 SET 
                     hisnumber_infoclinica = NEW.hisnumber,
@@ -264,7 +280,7 @@ BEGIN
     -- If we didn't merge, perform a regular update
     IF NOT v_merged THEN
         -- Update the consolidated patient record based on HIS source
-        IF v_his_name = 'qMS' THEN
+        IF NEW.source = 1 THEN  -- qMS
             UPDATE patients
             SET 
                 -- Always update demographic data with the latest values
@@ -281,7 +297,7 @@ BEGIN
                 telephone_qms = NEW.telephone,
                 password_qms = NEW.his_password
             WHERE uuid = NEW.uuid;
-        ELSIF v_his_name = 'Инфоклиника' THEN
+        ELSIF NEW.source = 2 THEN  -- Инфоклиника
             UPDATE patients
             SET 
                 -- Always update demographic data with the latest values

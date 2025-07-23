@@ -5,6 +5,22 @@ Test data generator for the patient matching system.
 This script generates test records with varying degrees of overlap
 to test the patient matching trigger mechanism in the database.
 It can test both inserts and updates.
+
+Examples:
+    # Generate 10,000 test patients with 15% duplicates
+    python src/test_generator.py --mode insert --quantity 10000 -p your_password
+    
+    # Generate 50,000 patients with high duplicate rate
+    python src/test_generator.py --mode insert -q 50000 --duplicate-rate 0.3 -p your_password
+    
+    # Update existing records (70% NULL documents, 30% field updates)
+    python src/test_generator.py --mode update -q 5000 -p your_password
+    
+    # Memory-efficient generation for large datasets
+    python src/test_generator.py --mode insert -q 1000000 --memory-efficient -p your_password
+    
+    # Custom database connection
+    python src/test_generator.py --mode insert -q 10000 -d my_db -u my_user -H 192.168.1.100 -p password
 """
 
 import argparse
@@ -14,28 +30,54 @@ import psycopg2
 from datetime import datetime, timedelta
 import time
 import gc
+import sys
+import os
 from typing import Dict, List, Tuple, Optional, Set
+
+# Add the parent directory to the path so Python can find the modules
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+# Import configuration
+from src.config.settings import DATABASE_CONFIG, setup_logger
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Generate test patient data for database testing')
+    parser = argparse.ArgumentParser(
+        description='Generate test patient data for database testing',
+        epilog="""
+Examples:
+  %(prog)s --mode insert --quantity 10000 -p password
+    Generate 10,000 test patients with default settings
+    
+  %(prog)s --mode insert -q 50000 --duplicate-rate 0.3 -p password
+    Generate 50,000 patients with 30%% document duplicates
+    
+  %(prog)s --mode update -q 5000 -p password
+    Update 5,000 existing records (70%% NULL docs, 30%% field updates)
+    
+  %(prog)s --mode insert -q 1000000 --memory-efficient -p password
+    Memory-efficient generation for large datasets
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     
     # Main mode selection
     parser.add_argument('--mode', type=str, choices=['insert', 'update'], default='insert',
                         help='Test mode: insert new records or update existing ones')
     
     # Database connection parameters
-    parser.add_argument('-d', '--db', type=str, default='medical_system',
-                        help='Database name (default: medical_system)')
-    parser.add_argument('-u', '--user', type=str, default='medapp_user',
-                        help='Database user (default: medapp_user)')
+    parser.add_argument('-d', '--db', type=str, default=DATABASE_CONFIG["PostgreSQL"]["database"],
+                        help=f'Database name (default: {DATABASE_CONFIG["PostgreSQL"]["database"]})')
+    parser.add_argument('-u', '--user', type=str, default=DATABASE_CONFIG["PostgreSQL"]["user"],
+                        help=f'Database user (default: {DATABASE_CONFIG["PostgreSQL"]["user"]})')
     parser.add_argument('-p', '--password', type=str, required=True,
                         help='Database password')
-    parser.add_argument('-H', '--host', type=str, default='localhost',
-                        help='Database host (default: localhost)')
-    parser.add_argument('--port', type=int, default=5432,
-                        help='Database port (default: 5432)')
+    parser.add_argument('-H', '--host', type=str, default=DATABASE_CONFIG["PostgreSQL"]["host"],
+                        help=f'Database host (default: {DATABASE_CONFIG["PostgreSQL"]["host"]})')
+    parser.add_argument('--port', type=int, default=DATABASE_CONFIG["PostgreSQL"]["port"],
+                        help=f'Database port (default: {DATABASE_CONFIG["PostgreSQL"]["port"]})')
     
     # Insert mode parameters
     parser.add_argument('-q', '--quantity', type=int, default=100000,
@@ -61,6 +103,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--analyze-every', type=int, default=100000,
                         help='Run ANALYZE every N records (default: 100000)')
     
+    # Logging options
+    parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                        default='INFO', help='Logging level (default: INFO)')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Suppress progress output (logs will still be written)')
+    
     return parser.parse_args()
 
 
@@ -68,7 +116,8 @@ class TestDataGenerator:
     """Generator for test patient data."""
     
     def __init__(self, conn_params: Dict[str, str], duplicate_rate: float = 0.15, 
-                 memory_efficient: bool = False, max_memory_items: int = 10000):
+                 memory_efficient: bool = False, max_memory_items: int = 10000,
+                 quiet: bool = False):
         """
         Initialize the data generator.
         
@@ -77,11 +126,16 @@ class TestDataGenerator:
             duplicate_rate: Rate of document duplications (0-1)
             memory_efficient: If True, use less memory but potentially slower generation
             max_memory_items: Maximum number of items to keep in memory for duplicates
+            quiet: If True, suppress progress output
         """
         self.conn_params = conn_params
         self.duplicate_rate = duplicate_rate
         self.memory_efficient = memory_efficient
         self.max_memory_items = max_memory_items
+        self.quiet = quiet
+        
+        # Set up logging
+        self.logger = setup_logger(__name__, "test_generator")
         
         self.russian_first_names = ["Александр", "Мария", "Дмитрий", "Анна", "Иван", "Елена", 
                                    "Сергей", "Ольга", "Андрей", "Наталья", "Алексей", "Татьяна"]
@@ -121,41 +175,67 @@ class TestDataGenerator:
         
         self.total_generated = 0
         
+        self.logger.info("TestDataGenerator initialized")
+        self.logger.info(f"Duplicate rate: {duplicate_rate:.1%}")
+        self.logger.info(f"Memory efficient mode: {memory_efficient}")
+        
+    def _log_and_print(self, message: str, level: str = "INFO"):
+        """Log a message and optionally print it."""
+        # Always log
+        getattr(self.logger, level.lower())(message)
+        
+        # Print only if not quiet
+        if not self.quiet:
+            print(message)
+        
     def connect_db(self) -> psycopg2.extensions.connection:
         """Create database connection."""
-        return psycopg2.connect(**self.conn_params)
+        try:
+            conn = psycopg2.connect(**self.conn_params)
+            self.logger.info(f"Connected to database {self.conn_params['dbname']}")
+            return conn
+        except Exception as e:
+            self.logger.error(f"Failed to connect to database: {e}")
+            raise
     
     def load_existing_data(self):
         """Load existing document numbers and other data from the database."""
+        self.logger.info("Loading existing data from database...")
+        
         conn = self.connect_db()
         cursor = conn.cursor()
         
-        # Load existing document numbers
-        cursor.execute("SELECT documenttypes, document_number FROM patients WHERE document_number IS NOT NULL")
-        self.existing_documents = [(row[0], row[1]) for row in cursor.fetchall() if row[0] is not None]
-        
-        # Get the highest HIS numbers
-        cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 1")
-        max_qms = cursor.fetchone()[0]
-        if max_qms and max_qms.startswith('QMS'):
-            try:
-                self.qms_counter = int(max_qms[3:]) + 1
-            except ValueError:
-                pass
-                
-        cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 2")
-        max_infoclinica = cursor.fetchone()[0]
-        if max_infoclinica and max_infoclinica.startswith('IC'):
-            try:
-                self.infoclinica_counter = int(max_infoclinica[2:]) + 1
-            except ValueError:
-                pass
-        
-        cursor.close()
-        conn.close()
-        
-        print(f"Loaded {len(self.existing_documents)} existing document numbers")
-        print(f"Starting HIS counters: qMS={self.qms_counter}, Infoclinica={self.infoclinica_counter}")
+        try:
+            # Load existing document numbers
+            cursor.execute("SELECT documenttypes, document_number FROM patients WHERE document_number IS NOT NULL")
+            self.existing_documents = [(row[0], row[1]) for row in cursor.fetchall() if row[0] is not None]
+            
+            # Get the highest HIS numbers
+            cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 1")
+            max_qms = cursor.fetchone()[0]
+            if max_qms and max_qms.startswith('QMS'):
+                try:
+                    self.qms_counter = int(max_qms[3:]) + 1
+                except ValueError:
+                    pass
+                    
+            cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 2")
+            max_infoclinica = cursor.fetchone()[0]
+            if max_infoclinica and max_infoclinica.startswith('IC'):
+                try:
+                    self.infoclinica_counter = int(max_infoclinica[2:]) + 1
+                except ValueError:
+                    pass
+            
+            self.logger.info(f"Loaded {len(self.existing_documents)} existing document numbers")
+            self.logger.info(f"Starting HIS counters: qMS={self.qms_counter}, Infoclinica={self.infoclinica_counter}")
+            
+        except Exception as e:
+            self.logger.error(f"Error loading existing data: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
         
     def _trim_memory_lists(self):
         """Trim memory lists to prevent excessive memory usage."""
@@ -166,6 +246,7 @@ class TestDataGenerator:
                 keep_indices = random.sample(range(len(self.used_documents)), 
                                            int(self.max_memory_items * 0.8))
                 self.used_documents = [self.used_documents[i] for i in keep_indices]
+                self.logger.debug(f"Trimmed used_documents list to {len(self.used_documents)} items")
     
     def generate_document_type(self) -> int:
         """Generate a random document type based on realistic distribution."""
@@ -205,7 +286,9 @@ class TestDataGenerator:
             
         # Decide whether to use an existing document (duplicate)
         if (force_duplicate or random.random() < self.duplicate_rate) and self.used_documents:
-            return random.choice(self.used_documents)
+            doc = random.choice(self.used_documents)
+            self.logger.debug(f"Reusing existing document: type={doc[0]}, number={doc[1]}")
+            return doc
         
         # Generate a new document type and number
         doc_type = self.generate_document_type()
@@ -213,6 +296,7 @@ class TestDataGenerator:
         
         # Save for potential future duplicates
         self.used_documents.append((doc_type, doc_number))
+        self.logger.debug(f"Generated new document: type={doc_type}, number={doc_number}")
         
         return (doc_type, doc_number)
     
@@ -327,7 +411,7 @@ class TestDataGenerator:
         email = self.generate_email(first_name, last_name)
         password = self.generate_password()
         
-        return {
+        record = {
             'hisnumber': his_number,
             'source': his_id,
             'businessunit': business_unit_id,
@@ -341,9 +425,13 @@ class TestDataGenerator:
             'telephone': phone,
             'his_password': password
         }
+        
+        self.logger.debug(f"Generated patient record: {his_number} ({last_name} {first_name})")
+        return record
     
     def generate_batch(self, batch_size: int) -> List[Dict]:
         """Generate a batch of patient records."""
+        self.logger.debug(f"Generating batch of {batch_size} records")
         batch = []
         
         # Ensure some duplicates within each batch
@@ -362,6 +450,7 @@ class TestDataGenerator:
             self._trim_memory_lists()
             # Force garbage collection
             gc.collect()
+            self.logger.debug("Memory cleanup performed")
             
         return batch
     
@@ -374,6 +463,7 @@ class TestDataGenerator:
         """
         cursor = conn.cursor()
         success_count = 0
+        error_count = 0
         
         # Regular individual inserts with error handling
         for record in batch:
@@ -390,8 +480,9 @@ class TestDataGenerator:
                 """, record)
                 success_count += 1
             except Exception as e:
+                error_count += 1
                 conn.rollback()  # Rollback the transaction
-                print(f"Error inserting record: {e}")
+                self.logger.error(f"Error inserting record {record['hisnumber']}: {e}")
                 # Continue with next record
             
             # Commit every 100 records to avoid large transactions
@@ -402,20 +493,24 @@ class TestDataGenerator:
         conn.commit()
         cursor.close()
         
+        if error_count > 0:
+            self.logger.warning(f"Batch insert completed with {error_count} errors out of {len(batch)} records")
+        
         return success_count
 
     def run_analyze(self, conn: psycopg2.extensions.connection) -> None:
         """Run ANALYZE on tables to update statistics."""
         try:
+            self.logger.info("Running ANALYZE to update database statistics...")
             cursor = conn.cursor()
             cursor.execute("ANALYZE patientsdet")
             cursor.execute("ANALYZE patients")
             cursor.execute("ANALYZE patient_matching_log")
             conn.commit()
             cursor.close()
-            print("Database statistics updated with ANALYZE")
+            self.logger.info("Database statistics updated successfully")
         except Exception as e:
-            print(f"Warning: Could not update statistics: {e}")
+            self.logger.error(f"Could not update database statistics: {e}")
     
     def fetch_rows_for_update(self, conn: psycopg2.extensions.connection, 
                             limit: int, null_document_only: bool = False) -> List[Dict]:
@@ -443,29 +538,36 @@ class TestDataGenerator:
         LIMIT {limit}
         """
         
-        cursor.execute(query)
-        
-        rows = []
-        for row in cursor.fetchall():
-            rows.append({
-                'id': row[0],
-                'hisnumber': row[1],
-                'source': row[2],
-                'businessunit': row[3],
-                'lastname': row[4],
-                'name': row[5],
-                'surname': row[6],
-                'birthdate': row[7],
-                'documenttypes': row[8],
-                'document_number': row[9],
-                'email': row[10],
-                'telephone': row[11],
-                'his_password': row[12],
-                'uuid': row[13]
-            })
-        
-        cursor.close()
-        return rows
+        try:
+            cursor.execute(query)
+            
+            rows = []
+            for row in cursor.fetchall():
+                rows.append({
+                    'id': row[0],
+                    'hisnumber': row[1],
+                    'source': row[2],
+                    'businessunit': row[3],
+                    'lastname': row[4],
+                    'name': row[5],
+                    'surname': row[6],
+                    'birthdate': row[7],
+                    'documenttypes': row[8],
+                    'document_number': row[9],
+                    'email': row[10],
+                    'telephone': row[11],
+                    'his_password': row[12],
+                    'uuid': row[13]
+                })
+            
+            self.logger.debug(f"Fetched {len(rows)} rows for update (null_document_only={null_document_only})")
+            return rows
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching rows for update: {e}")
+            return []
+        finally:
+            cursor.close()
     
     def generate_updates_for_null_documents(self, rows: List[Dict], 
                                           match_existing_rate: float) -> List[Dict]:
@@ -480,6 +582,7 @@ class TestDataGenerator:
             List of update dictionaries
         """
         updates = []
+        matched_existing = 0
         
         for row in rows:
             update = row.copy()
@@ -489,6 +592,8 @@ class TestDataGenerator:
                 doc_type, doc_number = self.get_existing_document()
                 update['documenttypes'] = doc_type
                 update['document_number'] = doc_number
+                matched_existing += 1
+                self.logger.debug(f"Update will match existing document: type={doc_type}, number={doc_number}")
             else:
                 # Generate a new document that doesn't exist yet
                 doc_type = self.generate_document_type()
@@ -497,9 +602,11 @@ class TestDataGenerator:
                 update['document_number'] = doc_number
                 # Add to used list to avoid duplicates
                 self.used_documents.append((doc_type, doc_number))
+                self.logger.debug(f"Update will create new document: type={doc_type}, number={doc_number}")
             
             updates.append(update)
         
+        self.logger.info(f"Generated {len(updates)} document updates, {matched_existing} will match existing documents")
         return updates
     
     def generate_field_updates(self, rows: List[Dict]) -> List[Dict]:
@@ -546,8 +653,10 @@ class TestDataGenerator:
             if 'his_password' in fields_to_update:
                 update['his_password'] = self.generate_password()
             
+            self.logger.debug(f"Generated field updates for {update['hisnumber']}: {fields_to_update}")
             updates.append(update)
         
+        self.logger.info(f"Generated {len(updates)} field value updates")
         return updates
     
     def apply_updates(self, conn: psycopg2.extensions.connection, updates: List[Dict]) -> int:
@@ -563,6 +672,7 @@ class TestDataGenerator:
         """
         cursor = conn.cursor()
         success_count = 0
+        error_count = 0
         update_types = {'document_added': 0, 'fields_updated': 0}
         
         for update in updates:
@@ -602,9 +712,11 @@ class TestDataGenerator:
                         update_types['fields_updated'] += 1
                     
                     success_count += 1
+                    self.logger.debug(f"Updated record {update['hisnumber']} successfully")
                 except Exception as e:
+                    error_count += 1
                     conn.rollback()
-                    print(f"Error updating record: {e}")
+                    self.logger.error(f"Error updating record {update['hisnumber']}: {e}")
                     continue
             
             # Commit every 100 records
@@ -614,8 +726,10 @@ class TestDataGenerator:
         # Final commit
         conn.commit()
         
-        print(f"Update summary: {update_types['document_added']} documents added, "
-              f"{update_types['fields_updated']} records had fields updated")
+        self.logger.info(f"Update summary: {update_types['document_added']} documents added, "
+                        f"{update_types['fields_updated']} records had fields updated")
+        if error_count > 0:
+            self.logger.warning(f"Update completed with {error_count} errors out of {len(updates)} updates")
         
         cursor.close()
         return success_count
@@ -631,15 +745,17 @@ def run_insert_test(args: argparse.Namespace):
         'port': args.port
     }
     
-    generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient)
+    generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient, quiet=args.quiet)
     
     try:
         conn = generator.connect_db()
-        print(f"Connected to database {args.db}")
+        generator._log_and_print(f"Connected to database {args.db}")
         
         total_records = args.quantity
         batch_size = args.batch_size
         num_batches = (total_records + batch_size - 1) // batch_size  # Ceiling division
+        
+        generator._log_and_print(f"Starting insert test: {total_records} records in batches of {batch_size}")
         
         start_time = time.time()
         mem_cleanup_counter = 0
@@ -652,10 +768,10 @@ def run_insert_test(args: argparse.Namespace):
                 break
                 
             batch_start = time.time()
-            print(f"Generating batch {i+1}/{num_batches} ({current_batch_size} records)...")
+            generator._log_and_print(f"Generating batch {i+1}/{num_batches} ({current_batch_size} records)...")
             batch = generator.generate_batch(current_batch_size)
             
-            print(f"Inserting batch {i+1}...")
+            generator._log_and_print(f"Inserting batch {i+1}...")
             inserted = generator.insert_batch(conn, batch)
             total_inserted += inserted
             
@@ -664,7 +780,7 @@ def run_insert_test(args: argparse.Namespace):
             records_per_sec = total_inserted / elapsed if elapsed > 0 else 0
             batch_per_sec = inserted / batch_time if batch_time > 0 else 0
             
-            print(f"Progress: {total_inserted}/{total_records} records "
+            generator._log_and_print(f"Progress: {total_inserted}/{total_records} records "
                   f"({total_inserted/total_records*100:.1f}%), "
                   f"Avg: {records_per_sec:.1f} records/sec, "
                   f"Current: {batch_per_sec:.1f} records/sec")
@@ -672,7 +788,7 @@ def run_insert_test(args: argparse.Namespace):
             # Periodic memory cleanup
             mem_cleanup_counter += current_batch_size
             if mem_cleanup_counter >= args.clean_memory_every:
-                print("Cleaning memory...")
+                generator._log_and_print("Cleaning memory...")
                 # Clear references and force garbage collection
                 batch = None
                 gc.collect()
@@ -681,25 +797,27 @@ def run_insert_test(args: argparse.Namespace):
             # Periodically run ANALYZE to update statistics
             analyze_counter += current_batch_size
             if analyze_counter >= args.analyze_every:
-                print("Updating database statistics...")
+                generator._log_and_print("Updating database statistics...")
                 generator.run_analyze(conn)
                 analyze_counter = 0
         
         end_time = time.time()
         total_time = end_time - start_time
-        print(f"\nCompleted generating {total_inserted} records in {total_time:.2f} seconds")
-        print(f"Average speed: {total_inserted/total_time:.1f} records/second")
+        generator._log_and_print(f"\nCompleted generating {total_inserted} records in {total_time:.2f} seconds")
+        generator._log_and_print(f"Average speed: {total_inserted/total_time:.1f} records/second")
         
         # Run final ANALYZE to ensure statistics are up to date
         generator.run_analyze(conn)
         
         # Print database statistics
-        print_database_stats(conn)
+        print_database_stats(conn, generator.logger)
         
         conn.close()
         
     except Exception as e:
-        print(f"Error: {e}")
+        generator.logger.error(f"Error in insert test: {e}")
+        import traceback
+        generator.logger.error(traceback.format_exc())
         return 1
     
     return 0
@@ -715,11 +833,11 @@ def run_update_test(args: argparse.Namespace):
         'port': args.port
     }
     
-    generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient)
+    generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient, quiet=args.quiet)
     
     try:
         conn = generator.connect_db()
-        print(f"Connected to database {args.db}")
+        generator._log_and_print(f"Connected to database {args.db}")
         
         # Load existing data for better updates
         generator.load_existing_data()
@@ -732,19 +850,19 @@ def run_update_test(args: argparse.Namespace):
         field_updates = 0
         
         # Get stats before updates
-        print("\nDatabase statistics before updates:")
-        original_stats = get_database_stats(conn)
-        print_stats_dict(original_stats)
+        generator._log_and_print("\nDatabase statistics before updates:")
+        original_stats = get_database_stats(conn, generator.logger)
+        print_stats_dict(original_stats, generator.logger, generator.quiet)
         
         # 1. Update NULL documents
-        print("\n--- Testing NULL Document Updates ---")
+        generator._log_and_print("\n--- Testing NULL Document Updates ---")
         null_document_count = min(
             int(total_records * args.update_null_document_rate),
             original_stats['null_document_count']
         )
         
         if null_document_count > 0:
-            print(f"Will update {null_document_count} records with NULL documents")
+            generator._log_and_print(f"Will update {null_document_count} records with NULL documents")
             
             # Process in batches
             remaining = null_document_count
@@ -752,15 +870,15 @@ def run_update_test(args: argparse.Namespace):
                 current_batch = min(batch_size, remaining)
                 
                 # Fetch records with NULL documents
-                print(f"Fetching {current_batch} records with NULL documents...")
+                generator._log_and_print(f"Fetching {current_batch} records with NULL documents...")
                 null_document_rows = generator.fetch_rows_for_update(conn, current_batch, True)
                 
                 if not null_document_rows:
-                    print("No more NULL document records found")
+                    generator._log_and_print("No more NULL document records found")
                     break
                 
                 # Generate document updates
-                print(f"Generating document updates...")
+                generator._log_and_print(f"Generating document updates...")
                 updates = generator.generate_updates_for_null_documents(
                     null_document_rows, 
                     args.match_existing_document_rate
@@ -773,26 +891,26 @@ def run_update_test(args: argparse.Namespace):
                     update['update_type'] = 'document_added'
                 
                 # Apply updates
-                print(f"Applying {len(updates)} document updates...")
+                generator._log_and_print(f"Applying {len(updates)} document updates...")
                 updated = generator.apply_updates(conn, updates)
                 null_document_updates += updated
                 
-                print(f"Updated {updated} records with new document values")
+                generator._log_and_print(f"Updated {updated} records with new document values")
                 remaining -= updated
                 
                 # Print progress
                 if null_document_count > 0:
-                    print(f"NULL document updates progress: {null_document_updates}/{null_document_count} "
+                    generator._log_and_print(f"NULL document updates progress: {null_document_updates}/{null_document_count} "
                           f"({null_document_updates/null_document_count*100:.1f}%)")
         else:
-            print("No NULL document records to update")
+            generator._log_and_print("No NULL document records to update")
         
         # 2. Update fields on random records
-        print("\n--- Testing Field Updates ---")
+        generator._log_and_print("\n--- Testing Field Updates ---")
         field_update_count = int(total_records * args.update_fields_rate)
         
         if field_update_count > 0:
-            print(f"Will update {field_update_count} records with new field values")
+            generator._log_and_print(f"Will update {field_update_count} records with new field values")
             
             # Process in batches
             remaining = field_update_count
@@ -800,15 +918,15 @@ def run_update_test(args: argparse.Namespace):
                 current_batch = min(batch_size, remaining)
                 
                 # Fetch random records
-                print(f"Fetching {current_batch} random records...")
+                generator._log_and_print(f"Fetching {current_batch} random records...")
                 rows = generator.fetch_rows_for_update(conn, current_batch, False)
                 
                 if not rows:
-                    print("No more records found")
+                    generator._log_and_print("No more records found")
                     break
 
                 # Generate field updates
-                print(f"Generating field value updates...")
+                generator._log_and_print(f"Generating field value updates...")
                 updates = generator.generate_field_updates(rows)
 
                 # Mark original state
@@ -818,88 +936,96 @@ def run_update_test(args: argparse.Namespace):
                     update['update_type'] = 'fields_updated'
                 
                 # Apply updates
-                print(f"Applying {len(updates)} field updates...")
+                generator._log_and_print(f"Applying {len(updates)} field updates...")
                 updated = generator.apply_updates(conn, updates)
                 field_updates += updated
                 
-                print(f"Updated {updated} records with new field values")
+                generator._log_and_print(f"Updated {updated} records with new field values")
                 remaining -= updated
                 
                 # Print progress
                 if field_update_count > 0:
-                    print(f"Field updates progress: {field_updates}/{field_update_count} "
+                    generator._log_and_print(f"Field updates progress: {field_updates}/{field_update_count} "
                           f"({field_updates/field_update_count*100:.1f}%)")
         else:
-            print("No field updates requested")
+            generator._log_and_print("No field updates requested")
         
         # Run final ANALYZE to ensure statistics are up to date
         generator.run_analyze(conn)
         
         # Get stats after updates
-        print("\nDatabase statistics after updates:")
-        final_stats = get_database_stats(conn)
-        print_stats_dict(final_stats)
+        generator._log_and_print("\nDatabase statistics after updates:")
+        final_stats = get_database_stats(conn, generator.logger)
+        print_stats_dict(final_stats, generator.logger, generator.quiet)
         
         # Print update statistics
-        print("\nUpdate Test Results:")
-        print(f"Total records with NULL documents updated: {null_document_updates}")
-        print(f"Total records with field values updated: {field_updates}")
-        print(f"Total merged patients: {original_stats['patients_count'] - final_stats['patients_count']}")
+        generator._log_and_print("\nUpdate Test Results:")
+        generator._log_and_print(f"Total records with NULL documents updated: {null_document_updates}")
+        generator._log_and_print(f"Total records with field values updated: {field_updates}")
+        generator._log_and_print(f"Total merged patients: {original_stats['patients_count'] - final_stats['patients_count']}")
         
         # Analyze log changes
-        print("\nMatching Log Changes:")
+        generator._log_and_print("\nMatching Log Changes:")
         changes = analyze_log_changes(conn, original_stats['log_stats'], final_stats['log_stats'])
         for match_type, count in changes.items():
-            print(f"  - {match_type}: +{count}")
+            generator._log_and_print(f"  - {match_type}: +{count}")
         
         conn.close()
         
     except Exception as e:
-        print(f"Error in update test: {e}")
+        generator.logger.error(f"Error in update test: {e}")
         import traceback
-        traceback.print_exc()
+        generator.logger.error(traceback.format_exc())
         return 1
     
     return 0
 
 
-def get_database_stats(conn: psycopg2.extensions.connection) -> Dict:
+def get_database_stats(conn: psycopg2.extensions.connection, logger) -> Dict:
     """Get current database statistics."""
     cursor = conn.cursor()
     stats = {}
     
-    # Count patients in consolidated table
-    cursor.execute("SELECT COUNT(*) FROM patients")
-    stats['patients_count'] = cursor.fetchone()[0]
-    
-    # Count unique records in patientsdet
-    cursor.execute("SELECT COUNT(*) FROM patientsdet")
-    stats['patientsdet_count'] = cursor.fetchone()[0]
-    
-    # Count null document records
-    cursor.execute("SELECT COUNT(*) FROM patientsdet WHERE documenttypes IS NULL OR document_number IS NULL")
-    stats['null_document_count'] = cursor.fetchone()[0]
-    
-    # Count document types distribution
-    cursor.execute("""
-        SELECT documenttypes, COUNT(*) 
-        FROM patientsdet
-        WHERE documenttypes IS NOT NULL
-        GROUP BY documenttypes 
-        ORDER BY COUNT(*) DESC
-    """)
-    stats['document_types'] = {doc_type: count for doc_type, count in cursor.fetchall()}
-    
-    # Count match types
-    cursor.execute("""
-        SELECT match_type, COUNT(*) 
-        FROM patient_matching_log 
-        GROUP BY match_type 
-        ORDER BY COUNT(*) DESC
-    """)
-    stats['log_stats'] = {match_type: count for match_type, count in cursor.fetchall()}
-    
-    cursor.close()
+    try:
+        # Count patients in consolidated table
+        cursor.execute("SELECT COUNT(*) FROM patients")
+        stats['patients_count'] = cursor.fetchone()[0]
+        
+        # Count unique records in patientsdet
+        cursor.execute("SELECT COUNT(*) FROM patientsdet")
+        stats['patientsdet_count'] = cursor.fetchone()[0]
+        
+        # Count null document records
+        cursor.execute("SELECT COUNT(*) FROM patientsdet WHERE documenttypes IS NULL OR document_number IS NULL")
+        stats['null_document_count'] = cursor.fetchone()[0]
+        
+        # Count document types distribution
+        cursor.execute("""
+            SELECT documenttypes, COUNT(*) 
+            FROM patientsdet
+            WHERE documenttypes IS NOT NULL
+            GROUP BY documenttypes 
+            ORDER BY COUNT(*) DESC
+        """)
+        stats['document_types'] = {doc_type: count for doc_type, count in cursor.fetchall()}
+        
+        # Count match types
+        cursor.execute("""
+            SELECT match_type, COUNT(*) 
+            FROM patient_matching_log 
+            GROUP BY match_type 
+            ORDER BY COUNT(*) DESC
+        """)
+        stats['log_stats'] = {match_type: count for match_type, count in cursor.fetchall()}
+        
+        logger.debug(f"Retrieved database stats: {stats['patients_count']} patients, {stats['patientsdet_count']} patientsdet records")
+        
+    except Exception as e:
+        logger.error(f"Error getting database stats: {e}")
+        
+    finally:
+        cursor.close()
+        
     return stats
 
 
@@ -922,64 +1048,128 @@ def analyze_log_changes(conn: psycopg2.extensions.connection,
     return changes
 
 
-def print_stats_dict(stats: Dict):
+def print_stats_dict(stats: Dict, logger, quiet: bool = False):
     """Print database statistics in a readable format."""
-    print(f"Total patients in consolidated table: {stats['patients_count']}")
-    print(f"Total records in patientsdet: {stats['patientsdet_count']}")
-    print(f"Records with NULL documents: {stats['null_document_count']} "
-          f"({stats['null_document_count']/stats['patientsdet_count']*100:.1f}%)")
+    def log_and_print(message):
+        logger.info(message)
+        if not quiet:
+            print(message)
+    
+    log_and_print(f"Total patients in consolidated table: {stats['patients_count']}")
+    log_and_print(f"Total records in patientsdet: {stats['patientsdet_count']}")
+    
+    if stats['patientsdet_count'] > 0:
+        log_and_print(f"Records with NULL documents: {stats['null_document_count']} "
+              f"({stats['null_document_count']/stats['patientsdet_count']*100:.1f}%)")
     
     if 'document_types' in stats and stats['document_types']:
-        print("Document type distribution:")
+        log_and_print("Document type distribution:")
         for doc_type, count in stats['document_types'].items():
             doc_name = get_document_type_name(doc_type)
-            print(f"  - {doc_name} (ID: {doc_type}): {count} "
-                  f"({count/(stats['patientsdet_count']-stats['null_document_count'])*100:.1f}%)")
+            if stats['patientsdet_count'] > stats['null_document_count']:
+                percentage = count/(stats['patientsdet_count']-stats['null_document_count'])*100
+                log_and_print(f"  - {doc_name} (ID: {doc_type}): {count} ({percentage:.1f}%)")
+            else:
+                log_and_print(f"  - {doc_name} (ID: {doc_type}): {count}")
     
-    print("Matching log entries:")
+    log_and_print("Matching log entries:")
     for match_type, count in stats['log_stats'].items():
-        print(f"  - {match_type}: {count} ({count/stats['patientsdet_count']*100:.1f}%)")
+        if stats['patientsdet_count'] > 0:
+            percentage = count/stats['patientsdet_count']*100
+            log_and_print(f"  - {match_type}: {count} ({percentage:.1f}%)")
+        else:
+            log_and_print(f"  - {match_type}: {count}")
 
 
 def get_document_type_name(doc_type: int) -> str:
     """Get a human-readable name for a document type ID."""
-    document_types = {
-        1: 'Паспорт',
-        2: 'Паспорт СССР',
-        3: 'Заграничный паспорт РФ',
-        4: 'Заграничный паспорт СССР',
-        5: 'Свидетельство о рождении',
-        6: 'Удостоверение личности офицера',
-        7: 'Справка об освобождении из места лишения свободы',
-        8: 'Военный билет',
-        9: 'Дипломатический паспорт РФ',
-        10: 'Иностранный паспорт',
-        11: 'Свидетельство беженца',
-        12: 'Вид на жительство',
-        13: 'Удостоверение беженца',
-        14: 'Временное удостоверение',
-        15: 'Паспорт моряка',
-        16: 'Военный билет офицера запаса',
-        17: 'Иные документы'
-    }
-    return document_types.get(doc_type, f'Неизвестный тип ({doc_type})')
+    from src.config.settings import DOCUMENT_TYPES
+    return DOCUMENT_TYPES.get(doc_type, f'Неизвестный тип ({doc_type})')
 
 
-def print_database_stats(conn: psycopg2.extensions.connection):
+def print_database_stats(conn: psycopg2.extensions.connection, logger):
     """Print current database statistics."""
-    stats = get_database_stats(conn)
-    print_stats_dict(stats)
+    stats = get_database_stats(conn, logger)
+    print_stats_dict(stats, logger)
+
+
+def show_help_examples():
+    """Show detailed usage examples."""
+    examples = """
+Detailed Usage Examples:
+
+1. Basic insert test (10,000 records with default 15% duplicates):
+   python src/test_generator.py --mode insert --quantity 10000 -p your_password
+
+2. High-volume insert with more duplicates:
+   python src/test_generator.py --mode insert -q 100000 --duplicate-rate 0.25 -p your_password
+
+3. Memory-efficient mode for very large datasets:
+   python src/test_generator.py --mode insert -q 1000000 --memory-efficient --batch-size 500 -p your_password
+
+4. Update test (modify existing records):
+   python src/test_generator.py --mode update -q 5000 -p your_password
+
+5. Custom update rates:
+   python src/test_generator.py --mode update -q 10000 \\
+     --update-null-document-rate 0.8 \\
+     --update-fields-rate 0.2 \\
+     --match-existing-document-rate 0.6 \\
+     -p your_password
+
+6. Connect to remote database:
+   python src/test_generator.py --mode insert -q 50000 \\
+     -d my_database -u my_user -H 192.168.1.100 --port 5432 \\
+     -p your_password
+
+7. Quiet mode with debug logging:
+   python src/test_generator.py --mode insert -q 10000 \\
+     --quiet --log-level DEBUG -p your_password
+
+Performance Options:
+- --memory-efficient: Use less memory for large datasets (slower)
+- --batch-size: Number of records per database transaction
+- --clean-memory-every: Trigger garbage collection every N records
+- --analyze-every: Update database statistics every N records
+
+Update Mode Details:
+- --update-null-document-rate: Fraction of records that will have NULL documents filled
+- --update-fields-rate: Fraction of records that will have field values updated
+- --match-existing-document-rate: Of the NULL->document updates, how many should match existing documents (triggers merging)
+
+Logging:
+- All operations are logged to logs/test_generator.log
+- Use --log-level to control verbosity
+- Use --quiet to suppress console output but keep file logging
+"""
+    print(examples)
 
 
 def main():
     """Main function to run the test data generator."""
     args = parse_args()
     
+    # Set up logging level
+    import logging
+    if args.log_level:
+        logging.getLogger().setLevel(getattr(logging, args.log_level))
+    
+    # Show help examples if requested
+    if len(sys.argv) == 1:
+        show_help_examples()
+        return 0
+    
     if args.mode == 'insert':
-        print("Running in INSERT test mode")
+        if not args.quiet:
+            print("Running in INSERT test mode")
+            print(f"Will generate {args.quantity} records with {args.duplicate_rate:.1%} duplicate rate")
         return run_insert_test(args)
     else:  # update mode
-        print("Running in UPDATE test mode")
+        if not args.quiet:
+            print("Running in UPDATE test mode")
+            print(f"Will process {args.quantity} updates:")
+            print(f"  - {args.update_null_document_rate:.1%} NULL document updates")
+            print(f"  - {args.update_fields_rate:.1%} field value updates")
         return run_update_test(args)
 
 

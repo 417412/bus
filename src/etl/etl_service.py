@@ -1,17 +1,29 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from src.repositories.firebird_repository import FirebirdRepository
+from src.repositories.yottadb_repository import YottaDBRepository
 from src.repositories.postgres_repository import PostgresRepository
 from src.etl.transformers.firebird_transformer import FirebirdTransformer
+from src.etl.transformers.yottadb_transformer import YottaDBTransformer
 
 class ETLService:
     """Service for orchestrating ETL processes."""
     
-    def __init__(self, source_repo: FirebirdRepository, target_repo: PostgresRepository):
+    def __init__(self, source_repo: Union[FirebirdRepository, YottaDBRepository], target_repo: PostgresRepository):
         self.source_repo = source_repo
         self.target_repo = target_repo
-        self.transformer = FirebirdTransformer()
-        self.logger = logging.getLogger(__name__)
+        
+        # Select the appropriate transformer based on source repository type
+        if isinstance(source_repo, FirebirdRepository):
+            self.transformer = FirebirdTransformer()
+            self.logger = logging.getLogger(__name__ + ".firebird")
+        elif isinstance(source_repo, YottaDBRepository):
+            self.transformer = YottaDBTransformer()
+            self.logger = logging.getLogger(__name__ + ".yottadb")
+        else:
+            raise ValueError(f"Unsupported source repository type: {type(source_repo)}")
+        
+        self.logger.info(f"ETL Service initialized with {type(self.transformer).__name__}")
         
     def process_batch(self, batch_size: int = 100, last_id: Optional[str] = None) -> int:
         """
@@ -25,7 +37,7 @@ class ETLService:
             Number of successfully processed records
         """
         # Extract
-        self.logger.info(f"Extracting up to {batch_size} patients from source")
+        self.logger.info(f"Extracting up to {batch_size} patients from {type(self.source_repo).__name__}")
         raw_patients = self.source_repo.get_patients(batch_size=batch_size, last_id=last_id)
         
         if not raw_patients:
@@ -33,7 +45,7 @@ class ETLService:
             return 0
             
         # Transform
-        self.logger.info(f"Transforming {len(raw_patients)} patients")
+        self.logger.info(f"Transforming {len(raw_patients)} patients using {type(self.transformer).__name__}")
         transformed_patients = []
         for patient in raw_patients:
             try:
@@ -60,11 +72,94 @@ class ETLService:
             except Exception as e:
                 self.logger.error(f"Error loading patient {patient.get('hisnumber')}: {str(e)}")
         
-        # Save the last processed ID
-        if max_id is not None:
+        # Save the last processed ID (only for repositories that support it)
+        if max_id is not None and hasattr(self.source_repo, 'save_last_processed_id'):
             self.source_repo.save_last_processed_id(max_id)
         
         self.logger.info(f"Batch complete: {success_count}/{len(transformed_patients)} patients processed successfully")
+        return success_count
+    
+    def process_delta(self, batch_size: int = 100) -> int:
+        """
+        Process delta records (changes) from source to target.
+        Only available for repositories that support delta processing.
+        
+        Args:
+            batch_size: Maximum number of records to process
+            
+        Returns:
+            Number of successfully processed records
+        """
+        # Check if source repository supports delta processing
+        if not hasattr(self.source_repo, 'get_patient_deltas'):
+            self.logger.warning(f"{type(self.source_repo).__name__} does not support delta processing")
+            return 0
+        
+        # Get delta records
+        delta_records, processed_count = self.source_repo.get_patient_deltas(batch_size=batch_size)
+        
+        if not delta_records:
+            self.logger.info("No delta records to process")
+            return 0
+        
+        self.logger.info(f"Processing {len(delta_records)} delta records")
+        
+        # Group records by operation type
+        inserts = []
+        updates = []
+        deletes = []
+        
+        for record in delta_records:
+            operation = record.get('operation', '').upper()
+            
+            # Remove the operation and delta_id fields
+            record.pop('operation', None)
+            record.pop('delta_id', None)
+            
+            # Transform the record
+            try:
+                transformed = self.transformer.transform_patient(record)
+                
+                if operation == 'INSERT':
+                    inserts.append(transformed)
+                elif operation == 'UPDATE':
+                    updates.append(transformed)
+                elif operation == 'DELETE':
+                    deletes.append(transformed)
+            except Exception as e:
+                self.logger.error(f"Error transforming delta record: {str(e)}")
+        
+        # Process inserts and updates
+        success_count = 0
+        
+        # Process inserts
+        for record in inserts:
+            try:
+                if self.target_repo.insert_patient(record):
+                    success_count += 1
+            except Exception as e:
+                self.logger.error(f"Error inserting patient {record.get('hisnumber')}: {str(e)}")
+        
+        # Process updates
+        for record in updates:
+            try:
+                if self.target_repo.upsert_patient(record):
+                    success_count += 1
+            except Exception as e:
+                self.logger.error(f"Error updating patient {record.get('hisnumber')}: {str(e)}")
+        
+        # Process deletes (if implemented)
+        for record in deletes:
+            try:
+                hisnumber = record.get('hisnumber')
+                source = record.get('source')
+                if hisnumber and source:
+                    if self.target_repo.mark_patient_deleted(hisnumber, source):
+                        success_count += 1
+            except Exception as e:
+                self.logger.error(f"Error deleting patient {record.get('hisnumber')}: {str(e)}")
+        
+        self.logger.info(f"Delta processing complete: {success_count} records processed successfully")
         return success_count
     
     def process_delta(self, batch_size: int = 100) -> int:

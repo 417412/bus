@@ -222,24 +222,28 @@ class PostgresRepository:
         
     def patient_exists(self, hisnumber: str, source: int) -> bool:
         """
-        Check if a patient with the given hisnumber and source already exists.
+        Check if a patient already exists in the patientsdet table.
         
         Args:
-            hisnumber: Patient's unique identifier in the source system
+            hisnumber: Patient's HIS number
             source: Source system ID
             
         Returns:
-            True if the patient exists, False otherwise
+            True if patient exists, False otherwise
         """
         try:
-            with self.connector.connection.cursor() as cursor:
-                query = """
+            cursor = self.connector.connection.cursor()
+            cursor.execute("""
+                SELECT EXISTS(
                     SELECT 1 FROM patientsdet 
-                    WHERE hisnumber = '%s' AND source = %s
-                    LIMIT 1
-                """
-                cursor.execute(query, (hisnumber, source))
-                return cursor.fetchone() is not None
+                    WHERE hisnumber = %s AND source = %s
+                )
+            """, (hisnumber, source))  # Use parameterized query instead of string formatting
+            
+            result = cursor.fetchone()[0]
+            cursor.close()
+            return result
+            
         except Exception as e:
             self.logger.error(f"Error checking if patient {hisnumber} exists: {e}")
             return False
