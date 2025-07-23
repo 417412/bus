@@ -3,9 +3,13 @@ from typing import Dict, Any, Optional, List
 from src.connectors.postgres_connector import PostgresConnector
 
 class PostgresRepository:
-    """Repository for accessing PostgreSQL data."""
-    
-    def __init__(self, connector: PostgresConnector):
+
+    def __init__(self, connector: PostgresConnector = None):
+        """Initialize repository with optional connector."""
+        if connector is None:
+            # Create connector with default decrypted config
+            connector = PostgresConnector()
+            
         self.connector = connector
         self.logger = logging.getLogger(__name__)
     

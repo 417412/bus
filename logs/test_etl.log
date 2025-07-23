@@ -697,3 +697,81 @@ Test Results Summary:
 2025-07-23 19:48:47,993 - test_etl - INFO - YottaDB ETL Process: ✓
 2025-07-23 19:48:47,993 - test_etl - INFO - 
 Tests completed.
+2025-07-24 00:18:32,522 - test_etl - INFO - Testing PostgreSQL connection...
+2025-07-24 00:18:32,541 - test_etl - INFO - PostgreSQL version: PostgreSQL 15.13 (Debian 15.13-0+deb12u1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit
+2025-07-24 00:18:32,543 - test_etl - INFO - Testing Firebird connection...
+2025-07-24 00:18:32,556 - test_etl - INFO - Testing YottaDB connection...
+2025-07-24 00:18:32,565 - test_etl - INFO - YottaDB connectivity test successful
+2025-07-24 00:18:32,567 - test_etl - INFO - Testing PostgreSQL schema...
+2025-07-24 00:18:32,595 - test_etl - INFO - All essential tables exist
+2025-07-24 00:18:32,596 - test_etl - INFO - Found 2 HIS systems in hislist table
+2025-07-24 00:18:32,596 - test_etl - INFO -   hislist entry: (1, 'qMS')
+2025-07-24 00:18:32,596 - test_etl - INFO -   hislist entry: (2, 'Инфоклиника')
+2025-07-24 00:18:32,597 - test_etl - INFO - Found 3 business units in businessunits table
+2025-07-24 00:18:32,597 - test_etl - INFO -   businessunits entry: (1, 'ОО ФК "Хадасса Медикал ЛТД"')
+2025-07-24 00:18:32,597 - test_etl - INFO -   businessunits entry: (2, 'ООО "Медскан"')
+2025-07-24 00:18:32,598 - test_etl - INFO -   businessunits entry: (3, 'ООО "Клинический госпиталь на Яузе"')
+2025-07-24 00:18:32,598 - test_etl - INFO - Found 17 document types in documenttypes table
+2025-07-24 00:18:32,598 - test_etl - INFO -   documenttypes entry: (1, 'Паспорт')
+2025-07-24 00:18:32,598 - test_etl - INFO -   documenttypes entry: (2, 'Паспорт СССР')
+2025-07-24 00:18:32,599 - test_etl - INFO -   documenttypes entry: (3, 'Заграничный паспорт РФ')
+2025-07-24 00:18:32,599 - test_etl - INFO -   documenttypes entry: (4, 'Заграничный паспорт СССР')
+2025-07-24 00:18:32,599 - test_etl - INFO -   documenttypes entry: (5, 'Свидетельство о рождении')
+2025-07-24 00:18:32,600 - test_etl - INFO - Testing document type handling...
+2025-07-24 00:18:32,637 - test_etl - INFO - Inserted qMS patient with Паспорт (ID: 1), number: 3212558402
+2025-07-24 00:18:32,640 - test_etl - INFO - Inserted Инфоклиника patient with Паспорт (ID: 1), number: 3287359976
+2025-07-24 00:18:32,642 - test_etl - INFO - Inserted qMS patient with Заграничный паспорт РФ (ID: 3), number: 101384776
+2025-07-24 00:18:32,643 - test_etl - INFO - Inserted Инфоклиника patient with Заграничный паспорт РФ (ID: 3), number: 255760715
+2025-07-24 00:18:32,645 - test_etl - INFO - Inserted qMS patient with Свидетельство о рождении (ID: 5), number: 716169984254
+2025-07-24 00:18:32,647 - test_etl - INFO - Inserted Инфоклиника patient with Свидетельство о рождении (ID: 5), number: 882811677836
+2025-07-24 00:18:32,648 - test_etl - INFO - Inserted qMS patient with Иностранный паспорт (ID: 10), number: 386443001
+2025-07-24 00:18:32,650 - test_etl - INFO - Inserted Инфоклиника patient with Иностранный паспорт (ID: 10), number: 289193955
+2025-07-24 00:18:32,652 - test_etl - INFO - Inserted qMS patient with Временное удостоверение (ID: 14), number: 24375262
+2025-07-24 00:18:32,654 - test_etl - INFO - Inserted Инфоклиника patient with Временное удостоверение (ID: 14), number: 67371011
+2025-07-24 00:18:32,655 - test_etl - INFO - Inserted qMS patient with Иные документы (ID: 17), number: 63644947
+2025-07-24 00:18:32,656 - test_etl - INFO - Inserted Инфоклиника patient with Иные документы (ID: 17), number: 95763114
+2025-07-24 00:18:32,656 - test_etl - INFO - Successfully inserted 12 out of 12 test patients with different document types
+2025-07-24 00:18:32,658 - test_etl - INFO - Testing Firebird ETL process...
+2025-07-24 00:18:32,666 - test_etl - INFO - Testing password encryption integration...
+2025-07-24 00:18:32,689 - test_etl - INFO - Firebird connection not available (expected in some environments)
+2025-07-24 00:18:32,698 - test_etl - INFO - YottaDB connection successful with decrypted config
+2025-07-24 00:18:32,731 - test_etl_components - INFO - Found 17 document types in configuration
+2025-07-24 00:22:47,334 - test_etl - INFO - Testing PostgreSQL connection...
+2025-07-24 00:22:47,353 - test_etl - INFO - PostgreSQL version: PostgreSQL 15.13 (Debian 15.13-0+deb12u1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit
+2025-07-24 00:22:47,355 - test_etl - INFO - Testing Firebird connection...
+2025-07-24 00:22:47,369 - test_etl - INFO - Testing YottaDB connection...
+2025-07-24 00:22:47,377 - test_etl - INFO - YottaDB connectivity test successful
+2025-07-24 00:22:47,379 - test_etl - INFO - Testing PostgreSQL schema...
+2025-07-24 00:22:47,404 - test_etl - INFO - All essential tables exist
+2025-07-24 00:22:47,405 - test_etl - INFO - Found 2 HIS systems in hislist table
+2025-07-24 00:22:47,405 - test_etl - INFO -   hislist entry: (1, 'qMS')
+2025-07-24 00:22:47,405 - test_etl - INFO -   hislist entry: (2, 'Инфоклиника')
+2025-07-24 00:22:47,406 - test_etl - INFO - Found 3 business units in businessunits table
+2025-07-24 00:22:47,406 - test_etl - INFO -   businessunits entry: (1, 'ОО ФК "Хадасса Медикал ЛТД"')
+2025-07-24 00:22:47,406 - test_etl - INFO -   businessunits entry: (2, 'ООО "Медскан"')
+2025-07-24 00:22:47,406 - test_etl - INFO -   businessunits entry: (3, 'ООО "Клинический госпиталь на Яузе"')
+2025-07-24 00:22:47,407 - test_etl - INFO - Found 17 document types in documenttypes table
+2025-07-24 00:22:47,407 - test_etl - INFO -   documenttypes entry: (1, 'Паспорт')
+2025-07-24 00:22:47,407 - test_etl - INFO -   documenttypes entry: (2, 'Паспорт СССР')
+2025-07-24 00:22:47,407 - test_etl - INFO -   documenttypes entry: (3, 'Заграничный паспорт РФ')
+2025-07-24 00:22:47,407 - test_etl - INFO -   documenttypes entry: (4, 'Заграничный паспорт СССР')
+2025-07-24 00:22:47,407 - test_etl - INFO -   documenttypes entry: (5, 'Свидетельство о рождении')
+2025-07-24 00:22:47,410 - test_etl - INFO - Testing document type handling...
+2025-07-24 00:22:47,435 - test_etl - INFO - Inserted qMS patient with Паспорт (ID: 1), number: 4544496493
+2025-07-24 00:22:47,438 - test_etl - INFO - Inserted Инфоклиника patient with Паспорт (ID: 1), number: 5206324439
+2025-07-24 00:22:47,440 - test_etl - INFO - Inserted qMS patient with Заграничный паспорт РФ (ID: 3), number: 144758604
+2025-07-24 00:22:47,442 - test_etl - INFO - Inserted Инфоклиника patient with Заграничный паспорт РФ (ID: 3), number: 255306746
+2025-07-24 00:22:47,444 - test_etl - INFO - Inserted qMS patient with Свидетельство о рождении (ID: 5), number: 940135370759
+2025-07-24 00:22:47,446 - test_etl - INFO - Inserted Инфоклиника patient with Свидетельство о рождении (ID: 5), number: 249425587365
+2025-07-24 00:22:47,447 - test_etl - INFO - Inserted qMS patient with Иностранный паспорт (ID: 10), number: 129810466
+2025-07-24 00:22:47,448 - test_etl - INFO - Inserted Инфоклиника patient with Иностранный паспорт (ID: 10), number: 980142791
+2025-07-24 00:22:47,449 - test_etl - INFO - Inserted qMS patient with Временное удостоверение (ID: 14), number: 24239947
+2025-07-24 00:22:47,451 - test_etl - INFO - Inserted Инфоклиника patient with Временное удостоверение (ID: 14), number: 26826335
+2025-07-24 00:22:47,452 - test_etl - INFO - Inserted qMS patient with Иные документы (ID: 17), number: 66129070
+2025-07-24 00:22:47,453 - test_etl - INFO - Inserted Инфоклиника patient with Иные документы (ID: 17), number: 56664721
+2025-07-24 00:22:47,453 - test_etl - INFO - Successfully inserted 12 out of 12 test patients with different document types
+2025-07-24 00:22:47,456 - test_etl - INFO - Testing Firebird ETL process...
+2025-07-24 00:22:47,464 - test_etl - INFO - Testing password encryption integration...
+2025-07-24 00:22:47,487 - test_etl - INFO - Firebird connection not available (expected in some environments)
+2025-07-24 00:22:47,496 - test_etl - INFO - YottaDB connection successful with decrypted config
+2025-07-24 00:22:47,502 - test_etl_components - INFO - Found 17 document types in configuration

@@ -7,9 +7,13 @@ import itertools
 from src.config.settings import setup_logger, STATE_DIR
 
 class FirebirdRepository:
-    """Repository for accessing Firebird data."""
     
-    def __init__(self, connector: FirebirdConnector):
+    def __init__(self, connector: FirebirdConnector = None):
+        """Initialize repository with optional connector."""
+        if connector is None:
+            # Create connector with default decrypted config
+            connector = FirebirdConnector()
+            
         self.connector = connector
         self.logger = setup_logger(__name__, "repositories")
         self.source_id = 2  # Инфоклиника
@@ -80,7 +84,16 @@ class FirebirdRepository:
             
             # Convert to list of dictionaries
             patients = [dict(zip(columns, row)) for row in rows]
-            self.logger.debug(f"Retrieved {len(patients)} patients from Firebird")
+            
+            # Enhanced logging with batch range information
+            if patients:
+                min_hisnumber = min(p.get('hisnumber', 0) for p in patients)
+                max_hisnumber = max(p.get('hisnumber', 0) for p in patients)
+                self.logger.info(f"Retrieved batch of {len(patients)} patients from Firebird "
+                               f"(range: {min_hisnumber} - {max_hisnumber})")
+            else:
+                self.logger.info(f"Retrieved empty batch from Firebird (last_id: {last_id})")
+                
             return patients
         except Exception as e:
             self.logger.error(f"Error fetching patients from Firebird: {str(e)}")
@@ -335,7 +348,8 @@ class FirebirdRepository:
                 total_count = rows[0][0]
                 last_id = rows[0][1]
                 
-                self.logger.info(f"Total patient count in Firebird: {total_count}, last ID: {last_id}")
+                # Only log this once per ETL run, not every batch
+                self.logger.debug(f"Total patient count in Firebird: {total_count}, last ID: {last_id}")
                 
                 if include_last_id:
                     return total_count, last_id
@@ -346,7 +360,3 @@ class FirebirdRepository:
         except Exception as e:
             self.logger.error(f"Error getting patient count from Firebird: {e}")
             return 0 if not include_last_id else (0, None)
-        
-    def get_source_id(self) -> int:
-        """Get the source ID for this repository."""
-        return self.source_id

@@ -3,7 +3,7 @@ import socket
 import sys
 from typing import Tuple, List, Dict, Any, Optional
 from firebird.driver import connect, driver_config
-from src.config.settings import setup_logger
+from src.config.settings import setup_logger, get_decrypted_database_config
 
 class FirebirdConnector:
     """Basic connector for Firebird providing connection management functionality."""
@@ -11,12 +11,26 @@ class FirebirdConnector:
     # Class-level flag to track if server was already registered
     _server_registered = False
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize Firebird connector.
+        
+        Args:
+            config: Database configuration dictionary. If None, will use decrypted config from settings.
+        """
+        # Use decrypted config if no config provided
+        if config is None:
+            config = get_decrypted_database_config()["Firebird"]
+        
         self.config = config
         self.connection = None
         self.logger = setup_logger(__name__, "connectors")
         self.server_name = "infoclinica_server"
         self.db_name = "infoclinica_db"
+        
+        # Log connection details (without password)
+        safe_config = {k: v if k.lower() != 'password' else '********' for k, v in self.config.items()}
+        self.logger.debug(f"Initializing Firebird connector with config: {safe_config}")
         
     def connect(self) -> bool:
         """Establish connection to Firebird database."""
@@ -32,6 +46,10 @@ class FirebirdConnector:
             # Try to diagnose connectivity before proceeding
             self._diagnose_connectivity(host, int(port))
             
+            # Get decrypted password for connection
+            password = self.config.get('password', 'masterkey')
+            user = self.config.get('user', 'SYSDBA')
+            
             # Only register server and database if not already done
             if not FirebirdConnector._server_registered:
                 try:
@@ -39,10 +57,13 @@ class FirebirdConnector:
                     server_cfg = f"""[{self.server_name}]
 host = {host}
 port = {port}
-user = {self.config.get('user', 'SYSDBA')}
-password = {self.config.get('password', 'masterkey')}
+user = {user}
+password = {password}
 """
-                    self.logger.debug(f"Server configuration: {server_cfg}")
+                    # Log config without password
+                    safe_server_cfg = server_cfg.replace(f"password = {password}", "password = ********")
+                    self.logger.debug(f"Server configuration: {safe_server_cfg}")
+                    
                     driver_config.register_server(self.server_name, server_cfg)
                     
                     # Register database
@@ -73,13 +94,17 @@ charset = {self.config.get('charset', 'cp1251')}
                 self.logger.info("Using previously registered Firebird configuration")
             
             # Establish connection
-            self.logger.info(f"Attempting to connect to Firebird at {host}:{port}, database: {self.config.get('database', '')}")
+            self.logger.info(f"Attempting to connect to Firebird at {host}:{port}, "
+                           f"database: {self.config.get('database', '')}, user: {user}")
             self.connection = connect(self.db_name)
             
             self.logger.info("Connected to Firebird using firebird-driver")
             return True
         except Exception as e:
             self.logger.error(f"Failed to connect to Firebird: {str(e)}")
+            # Don't log the actual password in error messages
+            if 'password' in str(e).lower():
+                self.logger.error("Connection failed - check username, password, and database path")
             return False
     
     def _diagnose_connectivity(self, host: str, port: int) -> None:
@@ -149,3 +174,21 @@ charset = {self.config.get('charset', 'cp1251')}
                 # This way we can tell it's a non-SELECT query by checking if rows is None
                 self.connection.commit()
                 return None, None
+    
+    def test_connection(self) -> bool:
+        """
+        Test the database connection.
+        
+        Returns:
+            True if connection is successful, False otherwise
+        """
+        try:
+            if self.connect():
+                # Try a simple query
+                rows, columns = self.execute_query("SELECT 1 FROM RDB$DATABASE")
+                self.disconnect()
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Connection test failed: {e}")
+            return False

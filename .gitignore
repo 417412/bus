@@ -4,3 +4,15 @@ state/infoclinica_last_sync.txt
 state/yottadb_last_id.txt
 state/yottadb_last_sync.txt
 src/etl_status.json
+src/repositories/__pycache__/firebird_repository.cpython-311.pyc
+src/repositories/__pycache__/postgres_repository.cpython-311.pyc
+src/repositories/__pycache__/yottadb_repository.cpython-311.pyc
+src/etl/transformers/__pycache__/firebird_transformer.cpython-311.pyc
+src/etl/transformers/__pycache__/yottadb_transformer.cpython-311.pyc
+src/connectors/__pycache__/firebird_connector.cpython-311.pyc
+src/connectors/__pycache__/postgres_connector.cpython-311.pyc
+src/connectors/__pycache__/yottadb_connector.cpython-311.pyc
+src/config/settings.py.backup
+src/config/__pycache__/settings.cpython-311.pyc
+logs/connectors.log
+logs/test_etl.log

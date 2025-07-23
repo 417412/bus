@@ -8,12 +8,22 @@ import sys
 import socket
 from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional, Tuple
-from src.config.settings import setup_logger
+from src.config.settings import setup_logger, get_decrypted_database_config
 
 class YottaDBConnector:
-    """Connector for YottaDB source system (qMS) via HTTP API."""
+    """Connector for YottaDB API operations."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize YottaDB connector.
+        
+        Args:
+            config: API configuration dictionary. If None, will use decrypted config from settings.
+        """
+        # Use decrypted config if no config provided  
+        if config is None:
+            config = get_decrypted_database_config()["YottaDB"]
+        
         self.config = config
         self.connection = None
         self.logger = setup_logger(__name__, "connectors")

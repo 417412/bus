@@ -23,6 +23,7 @@ sys.path.append(parent_dir)
 
 # Import configuration
 from src.config.settings import DATABASE_CONFIG, LOGGING_CONFIG, setup_logger
+from src.config.settings import get_decrypted_database_config
 
 # Import connectors and repositories
 from src.connectors.postgres_connector import PostgresConnector
@@ -126,8 +127,11 @@ def write_status(status_file: str, status: Dict[str, Any]) -> None:
 def create_etl_service(source_type: str) -> Optional[ETLService]:
     """Create and initialize ETL service with repositories and connectors."""
     try:
+        # Get decrypted database config
+        db_config = get_decrypted_database_config()
+        
         # Create PostgreSQL connector (always needed as target)
-        pg_connector = PostgresConnector(DATABASE_CONFIG["PostgreSQL"])
+        pg_connector = PostgresConnector(db_config["PostgreSQL"])
         
         if not pg_connector.connect():
             logger.error("Failed to connect to PostgreSQL database")
@@ -136,7 +140,7 @@ def create_etl_service(source_type: str) -> Optional[ETLService]:
         # Create source connector based on type
         if source_type == "firebird":
             logger.info("Creating Firebird ETL service")
-            source_connector = FirebirdConnector(DATABASE_CONFIG["Firebird"])
+            source_connector = FirebirdConnector(db_config["Firebird"])
             
             if not source_connector.connect():
                 logger.error("Failed to connect to Firebird database")
@@ -206,14 +210,6 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
 def perform_initial_load(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
     """
     Perform initial data load from source to PostgreSQL.
-    
-    Args:
-        etl_service: The ETL service to use
-        max_records: Maximum number of records to process per batch
-        force_check: If True, will check if initial load is complete before starting
-        
-    Returns:
-        Status dictionary
     """
     source_name = etl_service.source_repo.__class__.__name__
     source_id = etl_service.source_repo.get_source_id()
@@ -248,6 +244,11 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
     
     logger.info(f"Starting initial data load from {source_name} (source ID: {source_id})")
     start_time = datetime.now()
+    
+    # Get initial total count for progress tracking (log once at start)
+    total_source_count = etl_service.source_repo.get_total_patient_count()
+    logger.info(f"Total records in source {source_id}: {total_source_count}")
+    
     status = {
         "operation": "initial_load",
         "source": source_name,
@@ -268,10 +269,6 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             logger.info(f"Resuming from last processed ID: {last_id}")
             status["last_id"] = last_id
         
-        # Get initial count for progress tracking
-        source_count = etl_service.source_repo.get_total_patient_count()
-        logger.info(f"Total records in source {source_id}: {source_count}")
-        
         consecutive_empty_batches = 0
         max_empty_batches = 3  # Stop after 3 consecutive empty batches
         batch_counter = 0  # Counter for batches processed
@@ -281,11 +278,13 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             batch_start = datetime.now()
             
             # Get a batch of patients from source
+            logger.debug(f"Fetching batch {batch_counter} from source (last_id: {last_id})")
             patients = etl_service.source_repo.get_patients(batch_size=max_records, last_id=last_id)
             
             if not patients:
                 consecutive_empty_batches += 1
-                logger.info(f"No patients found beyond ID {last_id}. Empty batch {consecutive_empty_batches}/{max_empty_batches}")
+                logger.info(f"Batch {batch_counter}: No patients found beyond ID {last_id}. "
+                           f"Empty batch {consecutive_empty_batches}/{max_empty_batches}")
                 
                 if consecutive_empty_batches >= max_empty_batches:
                     logger.info(f"Reached {max_empty_batches} consecutive empty batches, finishing initial load")
@@ -307,6 +306,13 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             # Reset counter since we found records
             consecutive_empty_batches = 0
+            
+            # Log batch range information
+            if patients:
+                min_hisnumber = min(p.get('hisnumber', 0) for p in patients)
+                max_hisnumber = max(p.get('hisnumber', 0) for p in patients)
+                logger.info(f"Batch {batch_counter}: Processing {len(patients)} patients "
+                           f"(range: {min_hisnumber} - {max_hisnumber})")
             
             # Process the batch of patients
             batch_success_count = 0
@@ -353,28 +359,40 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             total_processed += batch_success_count
             
-            # Get current progress - check completion periodically
+            # Get current progress - check completion periodically but don't break
             if batch_counter % 5 == 0:  # Check every 5 batches
                 is_complete, current_source_count, current_dest_count = check_initial_load_complete(etl_service)
                 progress_percent = (current_dest_count / current_source_count * 100) if current_source_count > 0 else 0
                 
-                logger.info(f"Batch {batch_counter} processed in {batch_duration:.2f}s, "
+                logger.info(f"Batch {batch_counter} completed in {batch_duration:.2f}s, "
                            f"batch success: {batch_success_count}/{len(patients)}, "
                            f"total processed: {total_processed}, "
                            f"overall progress: {current_dest_count}/{current_source_count} ({progress_percent:.1f}%)")
                 
-                if is_complete:
-                    logger.info(f"Initial load complete: {current_dest_count}/{current_source_count} records loaded")
-                    break
+                # Don't break here - just report progress
+                
             else:
-                logger.debug(f"Batch {batch_counter} processed in {batch_duration:.2f}s, "
+                logger.debug(f"Batch {batch_counter} completed in {batch_duration:.2f}s, "
                            f"batch success: {batch_success_count}/{len(patients)}, "
                            f"total processed: {total_processed}")
             
             # Check if we've reached the end of data
             if len(patients) < max_records:
-                logger.info(f"Retrieved fewer records ({len(patients)}) than requested ({max_records}), "
+                logger.info(f"Batch {batch_counter}: Retrieved fewer records ({len(patients)}) than requested ({max_records}), "
                           f"might be near end of data")
+                
+                # Now check completion since we're near the end
+                is_complete, current_source_count, current_dest_count = check_initial_load_complete(etl_service)
+                progress_percent = (current_dest_count / current_source_count * 100) if current_source_count > 0 else 0
+                
+                logger.info(f"End of data check - Overall progress: {current_dest_count}/{current_source_count} ({progress_percent:.1f}%)")
+                
+                if is_complete:
+                    logger.info(f"Initial load complete: {current_dest_count}/{current_source_count} records loaded")
+                    break
+                else:
+                    logger.info(f"Near end of data but completion rate {progress_percent:.1f}% is below 95% threshold. Continuing...")
+                    # Continue processing even if we're near the end but haven't reached 95%
         
         # Final completion check
         is_complete, final_source_count, final_dest_count = check_initial_load_complete(etl_service)
@@ -387,15 +405,17 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
         status["duration"] = (status["end_time"] - start_time).total_seconds()
         status["status"] = "completed" if SHOULD_RUN else "interrupted"
         
+        logger.info(f"Initial load processing finished after {batch_counter} batches")
+        
         if is_complete:
             # Save last sync time only if we actually completed the initial load
             etl_service.source_repo.save_last_sync_time()
-            logger.info(f"Initial load {status['status']} for source {source_id}, "
+            logger.info(f"✓ Initial load {status['status']} for source {source_id}, "
                       f"processed {total_processed} records in "
                       f"{status['duration']:.2f} seconds. "
                       f"Final completion rate: {status['completion_rate']:.1%}")
         else:
-            logger.warning(f"Initial load not complete for source {source_id}: "
+            logger.warning(f"✗ Initial load not complete for source {source_id}: "
                          f"{final_dest_count}/{final_source_count} records loaded "
                          f"({status['completion_rate']:.1%}). Will continue on next run.")
         

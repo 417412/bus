@@ -94,19 +94,19 @@ class FirebirdTransformer:
             
             # Build standardized patient record
             return {
-                    "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
-                    "source": raw_patient.get('source', 2),  # Инфоклиника = 2
-                    "businessunit": raw_patient.get('businessunit', 2),  # Default businessunit for Инфоклиника
-                    "lastname": raw_patient.get('lastname'),
-                    "name": raw_patient.get('name'),
-                    "surname": raw_patient.get('surname'),
-                    "birthdate": birthdate,
-                    "documenttypes": doc_type,
-                    "document_number": document_number,
-                    "email": raw_patient.get('email'),
-                    "telephone": telephone,
-                    "his_password": raw_patient.get('his_password')
-                }
+                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                "source": raw_patient.get('source', 2),  # Инфоклиника = 2
+                "businessunit": raw_patient.get('businessunit', 2),  # Default businessunit for Инфоклиника
+                "lastname": raw_patient.get('lastname'),
+                "name": raw_patient.get('name'),
+                "surname": raw_patient.get('surname'),
+                "birthdate": birthdate,
+                "documenttypes": doc_type,
+                "document_number": doc_number,
+                "email": raw_patient.get('email'),
+                "telephone": raw_patient.get('telephone'),
+                "his_password": raw_patient.get('his_password')
+            }
         except Exception as e:
             self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
             # Return a minimal record with the hisnumber and source to maintain data flow

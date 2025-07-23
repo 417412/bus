@@ -9,6 +9,7 @@ import ast
 import json
 from pathlib import Path
 from typing import Dict, Any, Union
+from src.utils.password_manager import get_password_manager
 
 # Add the parent directory to the path so Python can find the modules
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,8 +63,16 @@ class ConfigManager:
         
         self.write_settings(new_content)
     
-    def update_dict_variable(self, var_name: str, new_dict: Dict[str, Any]) -> None:
-        """Update a dictionary variable in settings.py"""
+    def update_dict_variable(self, var_name: str, new_value: Dict[str, Any]) -> bool:
+        """
+        Update a dictionary variable in settings.py.
+        Automatically encrypts passwords in database configurations.
+        """
+        # If this is database config, encrypt passwords before processing
+        if var_name == "DATABASE_CONFIG":
+            password_manager = get_password_manager()
+            new_value = password_manager.encrypt_config_passwords(new_value)
+        
         content = self.read_settings()
         
         # Find the variable assignment - handle multiline dictionaries
@@ -93,12 +102,13 @@ class ConfigManager:
             raise ValueError(f"Could not find closing brace for {var_name}")
         
         # Format the new dictionary nicely
-        formatted_dict = self._format_dict(new_dict, indent=4)
+        formatted_dict = self._format_dict(new_value, indent=4)  # Changed new_dict to new_value
         
         new_assignment = f"{var_name} = {formatted_dict}"
         
         new_content = content[:start_pos] + new_assignment + content[end_pos:]
         self.write_settings(new_content)
+        return True  # Add return statement
     
     def update_simple_variable(self, var_name: str, new_value: Union[str, int, float, bool]) -> None:
         """Update a simple variable in settings.py"""

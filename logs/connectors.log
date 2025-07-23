@@ -282,3 +282,374 @@
 2025-07-23 19:48:46,762 - src.connectors.yottadb_connector - INFO - API call completed in 120.5 seconds
 2025-07-23 19:48:46,918 - src.connectors.yottadb_connector - INFO - Processing 410000 lines from API response
 2025-07-23 19:48:47,793 - src.connectors.yottadb_connector - INFO - Successfully fetched 409987 patients from YottaDB API
+2025-07-23 23:49:31,363 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-23 23:49:31,364 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-23 23:49:31,366 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-23 23:49:31,366 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:49:31,366 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-23 23:49:31,368 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-23 23:49:31,368 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:49:31,368 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-23 23:49:31,369 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:49:31,369 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:49:31,369 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:49:31,369 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:49:31,372 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:49:31,372 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:49:31,373 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:49:31,373 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:49:31,373 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:49:31,373 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:49:31,376 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:49:31,376 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:49:31,446 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-23 23:49:31,447 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-23 23:51:05,033 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-23 23:51:05,035 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-23 23:51:05,038 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-23 23:51:05,038 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:51:05,038 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-23 23:51:05,040 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-23 23:51:05,040 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:51:05,040 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-23 23:51:05,042 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:51:05,042 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:51:05,042 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:51:05,042 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:51:05,045 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:51:05,045 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:51:05,047 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:51:05,047 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:51:05,047 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:51:05,047 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:51:05,049 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:51:05,049 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:51:05,177 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-23 23:51:05,178 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-23 23:54:32,446 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-23 23:54:32,449 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-23 23:54:32,452 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-23 23:54:32,452 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:54:32,452 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-23 23:54:32,454 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-23 23:54:32,454 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:54:32,454 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-23 23:54:32,456 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:54:32,456 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:54:32,456 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:54:32,457 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:54:32,460 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:54:32,460 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:54:32,462 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:54:32,462 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:54:32,462 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:54:32,462 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:54:32,464 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:54:32,464 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:54:32,592 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-23 23:54:32,593 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-23 23:54:35,169 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-23 23:54:35,170 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-23 23:54:35,172 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-23 23:54:35,172 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:54:35,172 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-23 23:54:35,173 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-23 23:54:35,174 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-23 23:54:35,174 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-23 23:54:35,175 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:54:35,175 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:54:35,175 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:54:35,175 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:54:35,177 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:54:35,177 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:54:35,178 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://localhost/api
+2025-07-23 23:54:35,178 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=30s
+2025-07-23 23:54:35,178 - src.connectors.yottadb_connector - INFO - Extracted host: localhost
+2025-07-23 23:54:35,178 - src.connectors.yottadb_connector - INFO - Pinging localhost...
+2025-07-23 23:54:35,179 - src.connectors.yottadb_connector - INFO - Ping to localhost successful
+2025-07-23 23:54:35,179 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-23 23:54:35,293 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-23 23:54:35,294 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-24 00:06:48,923 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:06:48,925 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-24 00:06:48,929 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:06:48,929 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:06:48,929 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-24 00:06:48,931 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:06:48,932 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:06:48,932 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-24 00:06:48,933 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:06:48,934 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:06:48,934 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:06:48,934 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:06:48,934 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:06:48,934 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:06:48,965 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:06:48,965 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:06:48,965 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:06:48,965 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:06:48,966 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:06:48,966 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:06:48,966 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:06:48,966 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:06:48,966 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:06:48,968 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:06:48,969 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:06:48,970 - src.connectors.yottadb_connector - WARNING - TCP connection to 192.168.156.43:80 failed (error code: 1)
+2025-07-24 00:06:48,970 - src.connectors.yottadb_connector - ERROR - Network connectivity test failed - 192.168.156.43 is not reachable
+2025-07-24 00:06:48,982 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:06:48,982 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:06:48,982 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:06:48,982 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:06:48,983 - src.connectors.yottadb_connector - WARNING - Ping command not found, falling back to socket test
+2025-07-24 00:06:48,983 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:06:48,983 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:06:48,983 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:06:49,114 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:06:49,114 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-24 00:09:46,921 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:09:46,923 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-24 00:09:46,927 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:09:46,927 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:09:46,927 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-24 00:09:46,930 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:09:46,930 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:09:46,931 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 timed out
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:09:46,933 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:09:46,934 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:09:46,934 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:09:46,936 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:09:46,936 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:09:46,936 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:09:46,936 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:09:46,936 - src.connectors.yottadb_connector - WARNING - Ping command not found, falling back to socket test
+2025-07-24 00:09:46,937 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:09:46,937 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:09:46,937 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:09:46,939 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:09:46,940 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:09:46,940 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:09:46,940 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:09:46,940 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:09:46,940 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:09:46,942 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:09:46,942 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:09:46,942 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:09:46,942 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:09:46,943 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:09:46,943 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:09:46,943 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:09:46,944 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:09:46,944 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:09:46,947 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:09:46,948 - src.connectors.yottadb_connector - WARNING - TCP connection to 192.168.156.43:80 failed (error code: 1)
+2025-07-24 00:09:46,948 - src.connectors.yottadb_connector - ERROR - Network connectivity test failed - 192.168.156.43 is not reachable
+2025-07-24 00:09:47,104 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:09:47,104 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-24 00:13:15,155 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:13:15,158 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-24 00:13:15,161 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:13:15,162 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:13:15,162 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-24 00:13:15,164 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:13:15,165 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:13:15,165 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 timed out
+2025-07-24 00:13:15,167 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:13:15,168 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:13:15,168 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:13:15,168 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:13:15,170 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:13:15,171 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:13:15,171 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:13:15,171 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:13:15,171 - src.connectors.yottadb_connector - WARNING - Ping command not found, falling back to socket test
+2025-07-24 00:13:15,171 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:13:15,172 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:13:15,172 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:13:15,175 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:13:15,178 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:13:15,179 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:13:15,179 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:13:15,179 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:13:15,182 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:13:15,183 - src.connectors.yottadb_connector - WARNING - TCP connection to 192.168.156.43:80 failed (error code: 1)
+2025-07-24 00:13:15,183 - src.connectors.yottadb_connector - ERROR - Network connectivity test failed - 192.168.156.43 is not reachable
+2025-07-24 00:13:15,238 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:13:15,239 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-24 00:15:01,959 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:15:01,961 - src.connectors.postgres_connector - ERROR - Failed to connect to PostgreSQL: Connection failed
+2025-07-24 00:15:01,964 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:15:01,964 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:15:01,964 - src.connectors.firebird_connector - INFO - Connected to Firebird using firebird-driver
+2025-07-24 00:15:01,966 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:15:01,966 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at localhost:3050, database: test.fdb, user: SYSDBA
+2025-07-24 00:15:01,966 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Connection failed
+2025-07-24 00:15:01,968 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:15:01,968 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 timed out
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:15:01,969 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:15:01,970 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:15:01,971 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:15:01,971 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:15:01,972 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:15:01,972 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:15:01,972 - src.connectors.yottadb_connector - WARNING - Ping command not found, falling back to socket test
+2025-07-24 00:15:01,972 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:15:01,972 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:15:01,973 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:15:01,974 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:15:01,976 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:15:01,977 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:15:01,978 - src.connectors.yottadb_connector - INFO - TCP connection to 192.168.156.43:80 successful
+2025-07-24 00:15:01,978 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (TCP connection successful)
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - WARNING - Ping to 192.168.156.43 failed (return code: 1)
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Ping failed, trying TCP connection test...
+2025-07-24 00:15:01,980 - src.connectors.yottadb_connector - INFO - Testing TCP connection to 192.168.156.43:80...
+2025-07-24 00:15:01,981 - src.connectors.yottadb_connector - WARNING - TCP connection to 192.168.156.43:80 failed (error code: 1)
+2025-07-24 00:15:01,981 - src.connectors.yottadb_connector - ERROR - Network connectivity test failed - 192.168.156.43 is not reachable
+2025-07-24 00:15:01,991 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:15:01,992 - src.connectors.firebird_connector - INFO - Disconnected from Firebird
+2025-07-24 00:18:32,540 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:18:32,541 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:18:32,543 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:18:32,544 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:18:32,545 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:18:32,547 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.484/0.484/0.484/0.000 ms
+2025-07-24 00:18:32,548 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:18:32,548 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:18:32,554 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:18:32,557 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:18:32,557 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:18:32,557 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:18:32,557 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:18:32,565 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:18:32,565 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:18:32,585 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:18:32,599 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:18:32,619 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:18:32,656 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:18:32,658 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:18:32,659 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:18:32,659 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:18:32,661 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.428/0.428/0.428/0.000 ms
+2025-07-24 00:18:32,661 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:18:32,661 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:18:32,663 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:18:32,683 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:18:32,683 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:18:32,684 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:18:32,684 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:18:32,684 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:18:32,686 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.493/0.493/0.493/0.000 ms
+2025-07-24 00:18:32,686 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:18:32,686 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:18:32,689 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:18:32,689 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:18:32,689 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:18:32,689 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:18:32,689 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:18:32,698 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:18:32,698 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:22:47,352 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:22:47,353 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:22:47,355 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:22:47,356 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:22:47,356 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:22:47,359 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.562/0.562/0.562/0.000 ms
+2025-07-24 00:22:47,360 - src.connectors.firebird_connector - INFO - Registered Firebird server and database configurations
+2025-07-24 00:22:47,360 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:22:47,366 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:22:47,369 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:22:47,369 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:22:47,369 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:22:47,369 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:22:47,377 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:22:47,377 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)
+2025-07-24 00:22:47,397 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:22:47,408 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:22:47,426 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:22:47,454 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:22:47,456 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:22:47,457 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:22:47,457 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:22:47,459 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.495/0.495/0.495/0.000 ms
+2025-07-24 00:22:47,459 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:22:47,459 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:22:47,461 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:22:47,481 - src.connectors.postgres_connector - INFO - Connected to PostgreSQL
+2025-07-24 00:22:47,481 - src.connectors.postgres_connector - INFO - Disconnected from PostgreSQL
+2025-07-24 00:22:47,481 - src.connectors.firebird_connector - INFO - Testing TCP connectivity to 192.168.160.168:3050
+2025-07-24 00:22:47,482 - src.connectors.firebird_connector - WARNING - TCP connection to 192.168.160.168:3050 failed with error code 111
+2025-07-24 00:22:47,482 - src.connectors.firebird_connector - INFO - Attempting to ping 192.168.160.168
+2025-07-24 00:22:47,484 - src.connectors.firebird_connector - INFO - Ping result: rtt min/avg/max/mdev = 0.436/0.436/0.436/0.000 ms
+2025-07-24 00:22:47,484 - src.connectors.firebird_connector - INFO - Using previously registered Firebird configuration
+2025-07-24 00:22:47,484 - src.connectors.firebird_connector - INFO - Attempting to connect to Firebird at 192.168.160.168:3050, database: 099-1, user: SYSDBA
+2025-07-24 00:22:47,487 - src.connectors.firebird_connector - ERROR - Failed to connect to Firebird: Unable to complete network request to host "192.168.160.168".
+-Failed to establish a connection.
+2025-07-24 00:22:47,487 - src.connectors.yottadb_connector - INFO - Testing connectivity to YottaDB API: http://192.168.156.43/cgi-bin/qms_export_pat
+2025-07-24 00:22:47,487 - src.connectors.yottadb_connector - INFO - Configured timeouts: connect=300s, read=300s
+2025-07-24 00:22:47,487 - src.connectors.yottadb_connector - INFO - Extracted host: 192.168.156.43
+2025-07-24 00:22:47,487 - src.connectors.yottadb_connector - INFO - Pinging 192.168.156.43...
+2025-07-24 00:22:47,495 - src.connectors.yottadb_connector - INFO - Ping to 192.168.156.43 successful
+2025-07-24 00:22:47,495 - src.connectors.yottadb_connector - INFO - Network connectivity test passed (ping successful)

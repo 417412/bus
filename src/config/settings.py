@@ -17,14 +17,14 @@ BASE_DIR = Path(__file__).parent.parent.parent
 LOGS_DIR = BASE_DIR / "logs"
 STATE_DIR = BASE_DIR / "state"
 
-# Database Configurations
+# Database Configurations (passwords are encrypted)
 DATABASE_CONFIG = {
     "PostgreSQL": {
-        "host": "192.168.161.140",
+        "host": "localhost",
         "port": 5432,
         "database": "medical_system",
         "user": "medapp_user",
-        "password": "the2zG6tbewA3",
+        "password": "ilikewow",
 },
     "Firebird": {
         "host": "192.168.160.168",
@@ -123,6 +123,18 @@ _LOG_FILES = {
 LOGGING_CONFIG["files"] = {k: str(v) for k, v in _LOG_FILES.items()}
 LOGGING_CONFIG["base_dir"] = str(LOGS_DIR)
 
+def get_decrypted_database_config():
+    """Get database configuration with decrypted passwords."""
+    try:
+        from src.utils.password_manager import get_password_manager
+        
+        password_manager = get_password_manager()
+        return password_manager.decrypt_config_passwords(DATABASE_CONFIG)
+    except Exception as e:
+        # Fallback to original config if decryption fails
+        print(f"Warning: Could not decrypt passwords, using original config: {e}")
+        return DATABASE_CONFIG
+
 def setup_logger(name: str, log_file_key: str = "general", level: str = None):
     """
     Set up a logger with file and console handlers.
@@ -210,15 +222,33 @@ def reload_config():
     LOGGING_CONFIG["base_dir"] = str(LOGS_DIR)
 
 def get_config_info():
-    """Get current configuration information."""
-    return {
+    """Get current configuration information with decrypted passwords for display."""
+    config = {
         "directories": {
             "base_dir": str(BASE_DIR),
             "logs_dir": str(LOGS_DIR),
             "state_dir": str(STATE_DIR)
         },
-        "database_config": DATABASE_CONFIG,
+        "database_config": get_decrypted_database_config(),
         "logging_config": LOGGING_CONFIG,
         "etl_config": ETL_CONFIG,
         "system_config": SYSTEM_CONFIG
     }
+    
+    # Mask passwords in the returned config for security
+    import copy
+    masked_config = copy.deepcopy(config)
+    
+    def mask_passwords(obj):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key.lower() == 'password' and isinstance(value, str) and value:
+                    obj[key] = "********"
+                elif isinstance(value, (dict, list)):
+                    mask_passwords(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                mask_passwords(item)
+    
+    mask_passwords(masked_config)
+    return masked_config
