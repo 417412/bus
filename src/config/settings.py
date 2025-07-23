@@ -24,7 +24,7 @@ DATABASE_CONFIG = {
         # YottaDB specific configuration for HTTP API
         "api_url": "http://192.168.156.43/cgi-bin/qms_export_pat",
         "timeout": 300,  # 5 minutes read timeout (allowing extra time)
-        "connect_timeout": 30,  # 30 seconds connection timeout
+        "connect_timeout": 300,  # 30 seconds connection timeout
         "max_retries": 2,  # Fewer retries since each call is long
         "delimiter": "|"
     }

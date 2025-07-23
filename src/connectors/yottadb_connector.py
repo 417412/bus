@@ -15,7 +15,7 @@ class YottaDBConnector:
         self.source_id = 1  # qMS
         self.api_url = config.get('api_url', 'http://192.168.156.43/cgi-bin/qms_export_pat')
         self.timeout = config.get('timeout', 300)  # 5 minutes default timeout
-        self.connect_timeout = config.get('connect_timeout', 30)  # Connection timeout
+        self.connect_timeout = config.get('connect_timeout', 300)  # Connection timeout
         self.delimiter = config.get('delimiter', '|')
         self.max_retries = config.get('max_retries', 2)  # Fewer retries for long operations
         

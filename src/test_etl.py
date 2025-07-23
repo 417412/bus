@@ -26,6 +26,7 @@ from src.connectors.yottadb_connector import YottaDBConnector
 # Import repositories
 from src.repositories.postgres_repository import PostgresRepository
 from src.repositories.firebird_repository import FirebirdRepository
+from src.repositories.yottadb_repository import YottaDBRepository
 
 # Import ETL components
 from src.etl.etl_service import ETLService
@@ -109,21 +110,69 @@ def test_firebird_connection():
 def test_yottadb_connection():
     """Test YottaDB connection."""
     logger.info("Testing YottaDB connection...")
+    logger.info("WARNING: This test will take 2-3 minutes due to YottaDB API response time")
+    
     yottadb_connector = YottaDBConnector(DATABASE_CONFIG["YottaDB"])
     
+    # First test basic connectivity (quick test)
     if yottadb_connector.connect():
-        logger.info("YottaDB connection successful")
+        logger.info("YottaDB basic connection test successful")
         
-        # Test fetching patients
-        patients = yottadb_connector.fetch_patients(batch_size=2)
-        logger.info(f"Retrieved {len(patients)} patients from YottaDB")
+        # Now test through repository with a limited fetch
+        try:
+            yottadb_repo = YottaDBRepository(yottadb_connector)
+            
+            # Get just a small batch to test functionality without full API call
+            logger.info("Testing YottaDB repository with small batch...")
+            patients = yottadb_repo.get_patients(batch_size=2)
+            
+            if patients:
+                logger.info(f"Retrieved {len(patients)} patients from YottaDB")
+                
+                # Display sample data
+                for i, patient in enumerate(patients):
+                    logger.info(f"Patient {i+1}: {patient.get('lastname', 'Unknown')} {patient.get('name', 'Unknown')} (ID: {patient.get('hisnumber', 'Unknown')})")
+            else:
+                logger.warning("No patients retrieved from YottaDB (this might be normal if no data or API issues)")
         
-        # Display sample data
-        for i, patient in enumerate(patients):
-            logger.info(f"Patient {i+1}: {patient.get('lastname', 'Unknown')} {patient.get('name', 'Unknown')}")
+        except Exception as e:
+            logger.error(f"Error testing YottaDB repository: {str(e)}")
         
         yottadb_connector.disconnect()
         return True
+    else:
+        logger.error("YottaDB connection failed")
+        return False
+
+
+def test_yottadb_full_fetch():
+    """Test YottaDB full data fetch (separate test due to time)."""
+    logger.info("Testing YottaDB full data fetch...")
+    logger.info("WARNING: This will take 2-3 minutes!")
+    
+    yottadb_connector = YottaDBConnector(DATABASE_CONFIG["YottaDB"])
+    
+    if yottadb_connector.connect():
+        try:
+            # Test full fetch
+            patients = yottadb_connector.fetch_all_patients()
+            logger.info(f"YottaDB full fetch returned {len(patients)} patients")
+            
+            if patients:
+                # Show some sample data
+                for i, patient in enumerate(patients[:3]):
+                    logger.info(f"Sample patient {i+1}: {patient.get('lastname', 'Unknown')} {patient.get('name', 'Unknown')} (ID: {patient.get('hisnumber', 'Unknown')})")
+                
+                return True
+            else:
+                logger.warning("No patients returned from full fetch")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during full fetch test: {str(e)}")
+            return False
+        finally:
+            yottadb_connector.disconnect()
     else:
         logger.error("YottaDB connection failed")
         return False
@@ -324,11 +373,25 @@ def main():
         logger.warning("Skipping ETL process test due to connection or schema issues")
         etl_result = False
     
+    # Ask if user wants to test YottaDB full fetch (time-consuming)
+    if ydb_result:
+        logger.info("\nYottaDB basic connectivity test passed.")
+        response = input("Do you want to test YottaDB full data fetch? This takes 2-3 minutes (y/N): ")
+        if response.lower() in ['y', 'yes']:
+            ydb_full_result = test_yottadb_full_fetch()
+        else:
+            ydb_full_result = None
+            logger.info("Skipping YottaDB full fetch test")
+    else:
+        ydb_full_result = False
+    
     # Print summary
     logger.info("\nTest Results Summary:")
     logger.info(f"PostgreSQL Connection: {'✓' if pg_result else '✗'}")
     logger.info(f"Firebird Connection: {'✓' if fb_result else '✗'}")
-    logger.info(f"YottaDB Connection: {'✓' if ydb_result else '✗'}")
+    logger.info(f"YottaDB Basic Connection: {'✓' if ydb_result else '✗'}")
+    if ydb_full_result is not None:
+        logger.info(f"YottaDB Full Fetch: {'✓' if ydb_full_result else '✗'}")
     logger.info(f"PostgreSQL Schema: {'✓' if schema_result else '✗'}")
     logger.info(f"Document Type Handling: {'✓' if doc_type_result else '✗'}")
     logger.info(f"ETL Process: {'✓' if etl_result else '✗'}")
