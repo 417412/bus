@@ -7,10 +7,12 @@ Wants=postgresql.service
 Type=simple
 User=medapp_user
 Group=medapp_user
-WorkingDirectory=/path/to/your/application
-ExecStart=/path/to/your/application/venv/bin/python /path/to/your/application/src/daemons/etl_daemon.py --source yottadb --interval 1800 --max-records 500 --status-file yottadb_status.json
+WorkingDirectory=/home/medapp_user/medical_etl
+ExecStart=/home/medapp_user/medical_etl/venv/bin/python /home/medapp_user/medical_etl/src/daemons/etl_daemon.py --source yottadb --interval 3600 --max-records 500 --status-file yottadb_status.json
 Restart=on-failure
-RestartSec=60
+RestartSec=120
+TimeoutStartSec=600
+TimeoutStopSec=300
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=etl_yottadb_daemon
@@ -18,9 +20,10 @@ Environment=PYTHONUNBUFFERED=1
 
 # Security settings
 PrivateTmp=true
-ProtectSystem=full
-NoNewPrivileges=true
+ProtectSystem=strict
 ProtectHome=true
+ReadWritePaths=/home/medapp_user/medical_etl/logs /home/medapp_user/medical_etl/state /home/medapp_user/medical_etl
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

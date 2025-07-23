@@ -3,6 +3,8 @@ Configuration settings for the medical system ETL application.
 """
 
 # Database connection configurations
+# ... existing code ...
+
 DATABASE_CONFIG = {
     "PostgreSQL": {
         "host": "localhost",
@@ -21,10 +23,14 @@ DATABASE_CONFIG = {
     "YottaDB": {
         # YottaDB specific configuration for HTTP API
         "api_url": "http://192.168.156.43/cgi-bin/qms_export_pat",
-        "timeout": 3000,
+        "timeout": 300,  # 5 minutes read timeout (allowing extra time)
+        "connect_timeout": 30,  # 30 seconds connection timeout
+        "max_retries": 2,  # Fewer retries since each call is long
         "delimiter": "|"
     }
 }
+
+# ... rest of the code ...
 
 # Document type mapping (used for display and data mapping)
 DOCUMENT_TYPES = {
