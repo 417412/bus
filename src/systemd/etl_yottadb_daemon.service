@@ -1,0 +1,26 @@
+[Unit]
+Description=Medical System ETL Daemon - YottaDB (qMS)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=medapp_user
+Group=medapp_user
+WorkingDirectory=/path/to/your/application
+ExecStart=/path/to/your/application/venv/bin/python /path/to/your/application/src/daemons/etl_daemon.py --source yottadb --interval 1800 --max-records 500 --status-file yottadb_status.json
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=etl_yottadb_daemon
+Environment=PYTHONUNBUFFERED=1
+
+# Security settings
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

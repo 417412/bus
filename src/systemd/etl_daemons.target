@@ -1,0 +1,7 @@
+[Unit]
+Description=Medical System ETL Daemons
+Requires=etl_firebird_daemon.service etl_yottadb_daemon.service
+After=etl_firebird_daemon.service etl_yottadb_daemon.service
+
+[Install]
+WantedBy=multi-user.target

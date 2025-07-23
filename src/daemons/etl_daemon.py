@@ -3,7 +3,7 @@
 ETL Daemon for medical system data integration.
 
 This script runs as a daemon process, periodically syncing data from
-source systems (Firebird/Infoclinica) to the target system (PostgreSQL).
+source systems (Firebird/Infoclinica, YottaDB/qMS) to the target system (PostgreSQL).
 It handles both initial data loads and incremental delta syncs.
 """
 
@@ -27,25 +27,33 @@ from src.config.settings import DATABASE_CONFIG, LOGGING_CONFIG
 # Import connectors and repositories
 from src.connectors.postgres_connector import PostgresConnector
 from src.connectors.firebird_connector import FirebirdConnector
+from src.connectors.yottadb_connector import YottaDBConnector
 from src.repositories.postgres_repository import PostgresRepository
 from src.repositories.firebird_repository import FirebirdRepository
+from src.repositories.yottadb_repository import YottaDBRepository
 
 # Import ETL components
 from src.etl.etl_service import ETLService
 
 # Set up logging
-os.makedirs("logs", exist_ok=True)
-log_file = os.path.join("logs", "etl_daemon.log")
-
-logging.basicConfig(
-    level=getattr(logging, LOGGING_CONFIG.get("level", "INFO")),
-    format=LOGGING_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("etl_daemon")
+def setup_logging(source_type: str):
+    """Set up logging with source-specific log files."""
+    os.makedirs("logs", exist_ok=True)
+    log_file = os.path.join("logs", f"etl_daemon_{source_type}.log")
+    
+    # Clear existing handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    logging.basicConfig(
+        level=getattr(logging, LOGGING_CONFIG.get("level", "INFO")),
+        format=LOGGING_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
 
 # Global flag for graceful shutdown
 SHOULD_RUN = True
@@ -55,6 +63,12 @@ def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="ETL daemon for medical system data integration"
+    )
+    parser.add_argument(
+        "--source",
+        choices=["firebird", "yottadb"],
+        default="firebird",
+        help="Source system to sync from (default: firebird)"
     )
     parser.add_argument(
         "--initial-load",
@@ -130,29 +144,50 @@ def write_status(status_file: str, status: Dict[str, Any]) -> None:
         logger.error(f"Error writing status file: {e}")
 
 
-def create_etl_service() -> Optional[ETLService]:
+def create_etl_service(source_type: str) -> Optional[ETLService]:
     """Create and initialize ETL service with repositories and connectors."""
     try:
-        # Create connectors
-        fb_connector = FirebirdConnector(DATABASE_CONFIG["Firebird"])
+        # Create PostgreSQL connector (always needed as target)
         pg_connector = PostgresConnector(DATABASE_CONFIG["PostgreSQL"])
         
-        # Connect to databases
-        if not fb_connector.connect():
-            logger.error("Failed to connect to Firebird database")
-            return None
-            
         if not pg_connector.connect():
             logger.error("Failed to connect to PostgreSQL database")
-            fb_connector.disconnect()
             return None
         
-        # Create repositories
-        fb_repo = FirebirdRepository(fb_connector)
-        pg_repo = PostgresRepository(pg_connector)
+        # Create source connector based on type
+        if source_type == "firebird":
+            logger.info("Creating Firebird ETL service")
+            source_connector = FirebirdConnector(DATABASE_CONFIG["Firebird"])
+            
+            if not source_connector.connect():
+                logger.error("Failed to connect to Firebird database")
+                pg_connector.disconnect()
+                return None
+            
+            # Create repositories
+            source_repo = FirebirdRepository(source_connector)
+            pg_repo = PostgresRepository(pg_connector)
+            
+        elif source_type == "yottadb":
+            logger.info("Creating YottaDB ETL service")
+            source_connector = YottaDBConnector(DATABASE_CONFIG["YottaDB"])
+            
+            if not source_connector.connect():
+                logger.error("Failed to connect to YottaDB API")
+                pg_connector.disconnect()
+                return None
+            
+            # Create repositories
+            source_repo = YottaDBRepository(source_connector)
+            pg_repo = PostgresRepository(pg_connector)
+            
+        else:
+            logger.error(f"Unknown source type: {source_type}")
+            pg_connector.disconnect()
+            return None
         
         # Create and return ETL service
-        etl_service = ETLService(fb_repo, pg_repo)
+        etl_service = ETLService(source_repo, pg_repo)
         
         return etl_service
     except Exception as e:
@@ -168,7 +203,7 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
         Tuple of (is_complete, source_count, destination_count)
     """
     try:
-        # Get count from source (Firebird)
+        # Get count from source
         source_count = etl_service.source_repo.get_total_patient_count()
         
         # Get count from destination (PostgreSQL)
@@ -179,7 +214,8 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
         completion_threshold = 0.95
         is_complete = (destination_count >= source_count * completion_threshold)
         
-        logger.info(f"Source count: {source_count}, Destination count: {destination_count}, "
+        logger.info(f"Source ({etl_service.source_repo.__class__.__name__}) count: {source_count}, "
+                   f"Destination count: {destination_count}, "
                    f"Completion rate: {destination_count/source_count:.2%}")
         
         return is_complete, source_count, destination_count
@@ -190,7 +226,7 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
 
 def perform_initial_load(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
     """
-    Perform initial data load from Firebird to PostgreSQL.
+    Perform initial data load from source to PostgreSQL.
     
     Args:
         etl_service: The ETL service to use
@@ -200,6 +236,8 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
     Returns:
         Status dictionary
     """
+    source_name = etl_service.source_repo.__class__.__name__
+    
     # First check if initial load is already complete
     if force_check:
         is_complete, source_count, destination_count = check_initial_load_complete(etl_service)
@@ -208,6 +246,7 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             status = {
                 "operation": "initial_load",
+                "source": source_name,
                 "start_time": datetime.now(),
                 "end_time": datetime.now(),
                 "duration": 0,
@@ -226,10 +265,11 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
             
             return status
     
-    logger.info("Starting initial data load")
+    logger.info(f"Starting initial data load from {source_name}")
     start_time = datetime.now()
     status = {
         "operation": "initial_load",
+        "source": source_name,
         "start_time": start_time,
         "processed_records": 0,
         "success_count": 0,
@@ -389,12 +429,158 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
         return status
 
 
+def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
+    """
+    Perform YottaDB full synchronization (upsert all records).
+    Since YottaDB provides current state, we upsert everything.
+    """
+    source_name = etl_service.source_repo.__class__.__name__
+    
+    logger.info(f"Starting YottaDB full sync from {source_name}")
+    start_time = datetime.now()
+    status = {
+        "operation": "yottadb_full_sync",
+        "source": source_name,
+        "start_time": start_time,
+        "processed_records": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "new_records": 0,
+        "updated_records": 0,
+        "last_id": None,
+        "status": "running"
+    }
+    
+    try:
+        total_processed = 0
+        last_id = etl_service.source_repo.get_last_processed_id()
+        
+        if last_id:
+            logger.info(f"Resuming YottaDB sync from last processed ID: {last_id}")
+        
+        consecutive_empty_batches = 0
+        max_empty_batches = 3
+        batch_counter = 0
+        
+        while SHOULD_RUN and consecutive_empty_batches < max_empty_batches:
+            batch_counter += 1
+            batch_start = datetime.now()
+            
+            # Get a batch of patients from source
+            patients = etl_service.source_repo.get_patients(batch_size=max_records, last_id=last_id)
+            
+            if not patients:
+                consecutive_empty_batches += 1
+                logger.info(f"No more patients found beyond ID {last_id}. Empty batch {consecutive_empty_batches}/{max_empty_batches}")
+                if consecutive_empty_batches >= max_empty_batches:
+                    logger.info("YottaDB sync completed - no more records")
+                    break
+                
+                # Try incrementing last_id for YottaDB
+                try:
+                    new_last_id = str(int(last_id) + 1) if last_id else "0"
+                    last_id = new_last_id
+                    etl_service.source_repo.save_last_processed_id(last_id)
+                    logger.info(f"Incrementing last_id to {last_id} to continue search")
+                except (ValueError, TypeError):
+                    logger.warning(f"Cannot increment non-numeric last_id: {last_id}")
+                    break
+                continue
+            
+            consecutive_empty_batches = 0
+            
+            # Process the batch of patients with UPSERT logic
+            batch_success_count = 0
+            batch_new_count = 0
+            batch_updated_count = 0
+            
+            for raw_patient in patients:
+                try:
+                    # Transform the patient data
+                    patient = etl_service.transformer.transform_patient(raw_patient)
+                    
+                    hisnumber = patient.get('hisnumber')
+                    source = patient.get('source')
+                    
+                    # Check if patient exists to track new vs updated
+                    patient_exists = etl_service.target_repo.patient_exists(hisnumber, source)
+                    
+                    # Always upsert (insert or update)
+                    if etl_service.target_repo.upsert_patient(patient):
+                        batch_success_count += 1
+                        if patient_exists:
+                            batch_updated_count += 1
+                        else:
+                            batch_new_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing patient {raw_patient.get('hisnumber')}: {e}")
+                    status["error_count"] += 1
+            
+            # Update tracking
+            if patients:
+                try:
+                    max_hisnumber = max(p.get('hisnumber', '0') for p in patients)
+                    if max_hisnumber:
+                        last_id = max_hisnumber
+                        etl_service.source_repo.save_last_processed_id(last_id)
+                        logger.debug(f"Updated last_id to {last_id}")
+                except Exception as e:
+                    logger.error(f"Error determining last processed ID: {e}")
+            
+            # Update status
+            status["processed_records"] += len(patients)
+            status["success_count"] += batch_success_count
+            status["new_records"] += batch_new_count
+            status["updated_records"] += batch_updated_count
+            status["last_id"] = last_id
+            
+            batch_end = datetime.now()
+            batch_duration = (batch_end - batch_start).total_seconds()
+            total_processed += batch_success_count
+            
+            logger.info(f"Processed YottaDB batch {batch_counter} in {batch_duration:.2f}s: "
+                       f"{len(patients)} records, {batch_new_count} new, {batch_updated_count} updated, "
+                       f"total processed: {total_processed}")
+            
+            # Check if we've reached the end of data
+            if len(patients) < max_records:
+                logger.info(f"Retrieved fewer records ({len(patients)}) than requested ({max_records}), "
+                          f"might be near end of data")
+        
+        # Save last sync time
+        etl_service.source_repo.save_last_sync_time()
+        
+        # Update final status
+        status["end_time"] = datetime.now()
+        status["duration"] = (status["end_time"] - start_time).total_seconds()
+        status["status"] = "completed" if SHOULD_RUN else "interrupted"
+        
+        logger.info(f"YottaDB sync {status['status']}: "
+                   f"processed {total_processed} records "
+                   f"({status['new_records']} new, {status['updated_records']} updated) "
+                   f"in {status['duration']:.2f} seconds")
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error during YottaDB sync: {e}")
+        status["end_time"] = datetime.now()
+        status["duration"] = (status["end_time"] - start_time).total_seconds()
+        status["status"] = "failed"
+        status["error"] = str(e)
+        return status
+
+
 def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
-    """Perform delta synchronization from Firebird to PostgreSQL."""
-    logger.info("Starting delta synchronization")
+    """Perform delta synchronization from source to PostgreSQL."""
+    source_name = etl_service.source_repo.__class__.__name__
+    
+    logger.info(f"Starting delta synchronization from {source_name}")
     start_time = datetime.now()
     status = {
         "operation": "delta_sync",
+        "source": source_name,
         "start_time": start_time,
         "total_delta_records": 0,
         "unique_patients": 0,
@@ -521,9 +707,17 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
 def main():
     """Main function."""
     args = parse_args()
+    
+    # Set up source-specific logging
+    setup_logging(args.source)
+    
+    # Now we can get the logger after logging is set up
+    global logger
+    logger = logging.getLogger("etl_daemon")
+    
     setup_signal_handlers()
     
-    logger.info("ETL Daemon starting")
+    logger.info(f"ETL Daemon starting with source: {args.source}")
     
     start_time = datetime.now()
     max_end_time = None
@@ -539,8 +733,13 @@ def main():
         logger.error("Cannot specify both --initial-load and --delta-sync")
         return 1
     
+    # Delta sync is not supported for YottaDB
+    if args.source == "yottadb" and args.delta_sync:
+        logger.error("Delta sync is not supported for YottaDB source")
+        return 1
+    
     # Set up ETL service
-    etl_service = create_etl_service()
+    etl_service = create_etl_service(args.source)
     if not etl_service:
         logger.error("Failed to create ETL service")
         return 1
@@ -561,7 +760,10 @@ def main():
             
             # Perform ETL operations
             if args.initial_load:
-                status = perform_initial_load(etl_service, args.max_records, args.force_completion_check)
+                if args.source == "yottadb":
+                    status = perform_yottadb_sync(etl_service, args.max_records)
+                else:
+                    status = perform_initial_load(etl_service, args.max_records, args.force_completion_check)
                 write_status(args.status_file, status)
                 break  # Exit after initial load
             elif args.delta_sync:
@@ -570,30 +772,35 @@ def main():
                 if run_once:
                     break
             else:
-                # Regular operation: First check if initial load is complete
-                # by comparing record counts
-                is_complete, source_count, destination_count = check_initial_load_complete(etl_service)
-                last_sync_time = etl_service.source_repo.get_last_sync_time()
-                
-                if not is_complete:
-                    # Initial load is not complete, continue with it
-                    logger.info(f"Initial load not complete ({destination_count}/{source_count}). Continuing...")
-                    status = perform_initial_load(etl_service, args.max_records)
-                    
-                    # If the load is still not complete, we'll continue in the next cycle
-                    if status.get("status") == "completed" and status.get("completion_rate", 0) < 0.95:
-                        logger.warning("Initial load cycle completed but overall load is not complete. "
-                                      "Will continue in next cycle.")
-                elif last_sync_time is None:
-                    # Initial load is complete but no sync time recorded
-                    # This can happen if we're switching from an old version
-                    logger.info("Initial load complete but no sync time recorded. Setting now.")
-                    etl_service.source_repo.save_last_sync_time()
-                    status = {"operation": "sync_time_update", "status": "completed"}
+                # Regular operation
+                if args.source == "yottadb":
+                    # For YottaDB, always do full sync
+                    logger.info("YottaDB source: performing periodic full sync")
+                    status = perform_yottadb_sync(etl_service, args.max_records)
                 else:
-                    # Initial load is complete and we have a sync time, do delta sync
-                    logger.info(f"Last sync: {last_sync_time.isoformat()}, performing delta sync")
-                    status = perform_delta_sync(etl_service, args.max_records)
+                    # For Firebird, check initial load completion and do delta sync
+                    is_complete, source_count, destination_count = check_initial_load_complete(etl_service)
+                    last_sync_time = etl_service.source_repo.get_last_sync_time()
+                    
+                    if not is_complete:
+                        # Initial load is not complete, continue with it
+                        logger.info(f"Initial load not complete ({destination_count}/{source_count}). Continuing...")
+                        status = perform_initial_load(etl_service, args.max_records)
+                        
+                        # If the load is still not complete, we'll continue in the next cycle
+                        if status.get("status") == "completed" and status.get("completion_rate", 0) < 0.95:
+                            logger.warning("Initial load cycle completed but overall load is not complete. "
+                                          "Will continue in next cycle.")
+                    elif last_sync_time is None:
+                        # Initial load is complete but no sync time recorded
+                        # This can happen if we're switching from an old version
+                        logger.info("Initial load complete but no sync time recorded. Setting now.")
+                        etl_service.source_repo.save_last_sync_time()
+                        status = {"operation": "sync_time_update", "status": "completed"}
+                    else:
+                        # Initial load is complete and we have a sync time, do delta sync
+                        logger.info(f"Last sync: {last_sync_time.isoformat()}, performing delta sync")
+                        status = perform_delta_sync(etl_service, args.max_records)
                 
                 write_status(args.status_file, status)
                 

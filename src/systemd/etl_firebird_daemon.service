@@ -1,0 +1,26 @@
+[Unit]
+Description=Medical System ETL Daemon - Firebird (Infoclinica)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=medapp_user
+Group=medapp_user
+WorkingDirectory=/path/to/your/application
+ExecStart=/path/to/your/application/venv/bin/python /path/to/your/application/src/daemons/etl_daemon.py --source firebird --interval 300 --max-records 1000 --status-file firebird_status.json
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=etl_firebird_daemon
+Environment=PYTHONUNBUFFERED=1
+
+# Security settings
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
