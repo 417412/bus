@@ -2,9 +2,21 @@
 Configuration settings for the medical system ETL application.
 """
 
-# Database connection configurations
-# ... existing code ...
+import os
+from pathlib import Path
 
+# Base directory for the project
+BASE_DIR = Path(__file__).parent.parent.parent
+
+# Logs directory - create if it doesn't exist
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+# State directory - create if it doesn't exist  
+STATE_DIR = BASE_DIR / "state"
+STATE_DIR.mkdir(exist_ok=True)
+
+# Database connection configurations
 DATABASE_CONFIG = {
     "PostgreSQL": {
         "host": "localhost",
@@ -29,8 +41,6 @@ DATABASE_CONFIG = {
         "delimiter": "|"
     }
 }
-
-# ... rest of the code ...
 
 # Document type mapping (used for display and data mapping)
 DOCUMENT_TYPES = {
@@ -63,5 +73,62 @@ EXTERNAL_DOCUMENT_TYPE_MAPPING = {
 LOGGING_CONFIG = {
     "level": "INFO",
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "file": "etl_test.log"
+    "base_dir": str(LOGS_DIR),
+    "files": {
+        "etl_daemon_firebird": str(LOGS_DIR / "etl_daemon_firebird.log"),
+        "etl_daemon_yottadb": str(LOGS_DIR / "etl_daemon_yottadb.log"),
+        "debug_yottadb": str(LOGS_DIR / "debug_yottadb.log"),
+        "test_etl": str(LOGS_DIR / "test_etl.log"),
+        "test_generator": str(LOGS_DIR / "test_generator.log"),
+        "connectors": str(LOGS_DIR / "connectors.log"),
+        "repositories": str(LOGS_DIR / "repositories.log"),
+        "transformers": str(LOGS_DIR / "transformers.log"),
+        "general": str(LOGS_DIR / "general.log")
+    }
 }
+
+def setup_logger(name: str, log_file_key: str = "general", level: str = None):
+    """
+    Set up a logger with file and console handlers.
+    
+    Args:
+        name: Name of the logger
+        log_file_key: Key from LOGGING_CONFIG["files"] to determine log file
+        level: Log level (defaults to LOGGING_CONFIG["level"])
+    
+    Returns:
+        Configured logger
+    """
+    import logging
+    
+    # Get or create logger
+    logger = logging.getLogger(name)
+    
+    # Don't add handlers if they already exist
+    if logger.handlers:
+        return logger
+    
+    # Set level
+    log_level = level or LOGGING_CONFIG["level"]
+    logger.setLevel(getattr(logging, log_level))
+    
+    # Create formatter
+    formatter = logging.Formatter(LOGGING_CONFIG["format"])
+    
+    # File handler
+    log_file = LOGGING_CONFIG["files"].get(log_file_key, LOGGING_CONFIG["files"]["general"])
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(getattr(logging, log_level))
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(getattr(logging, log_level))
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # Prevent propagation to root logger
+    logger.propagate = False
+    
+    return logger

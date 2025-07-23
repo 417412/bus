@@ -4,13 +4,14 @@ from typing import List, Dict, Any, Optional, Tuple
 from src.connectors.firebird_connector import FirebirdConnector
 from datetime import datetime
 import itertools
+from src.config.settings import setup_logger
 
 class FirebirdRepository:
     """Repository for accessing Firebird data."""
     
     def __init__(self, connector: FirebirdConnector):
         self.connector = connector
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "repositories")
         self.source_id = 2  # Инфоклиника
         self.state_dir = "state"
         

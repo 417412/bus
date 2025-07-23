@@ -3,6 +3,7 @@ import socket
 import sys
 from typing import Tuple, List, Dict, Any, Optional
 from firebird.driver import connect, driver_config
+from src.config.settings import setup_logger
 
 class FirebirdConnector:
     """Basic connector for Firebird providing connection management functionality."""
@@ -13,7 +14,7 @@ class FirebirdConnector:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.connection = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "connectors")
         self.server_name = "infoclinica_server"
         self.db_name = "infoclinica_db"
         

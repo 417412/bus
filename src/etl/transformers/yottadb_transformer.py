@@ -2,12 +2,13 @@ import logging
 import re
 from typing import Dict, Any, Optional
 from datetime import datetime
+from src.config.settings import setup_logger
 
 class YottaDBTransformer:
     """Transform raw YottaDB (qMS) data into standardized format."""
     
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "transformers")
         
         # Map for document types from qMS to our schema
         self.document_type_map = {

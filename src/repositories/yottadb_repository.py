@@ -3,15 +3,16 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 from src.connectors.yottadb_connector import YottaDBConnector
 from datetime import datetime
+from src.config.settings import setup_logger, STATE_DIR
 
 class YottaDBRepository:
     """Repository for accessing YottaDB data via HTTP API."""
     
     def __init__(self, connector: YottaDBConnector):
         self.connector = connector
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "repositories")
         self.source_id = 1  # qMS
-        self.state_dir = "state"
+        self.state_dir = str(STATE_DIR)
         
         # Ensure state directory exists
         os.makedirs(self.state_dir, exist_ok=True)

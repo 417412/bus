@@ -16,7 +16,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import configuration
-from src.config.settings import DATABASE_CONFIG, DOCUMENT_TYPES, LOGGING_CONFIG
+from src.config.settings import DATABASE_CONFIG, DOCUMENT_TYPES, setup_logger
 
 # Import connectors
 from src.connectors.postgres_connector import PostgresConnector
@@ -32,15 +32,7 @@ from src.repositories.yottadb_repository import YottaDBRepository
 from src.etl.etl_service import ETLService
 
 # Set up logging
-logging.basicConfig(
-    level=getattr(logging, LOGGING_CONFIG["level"]),
-    format=LOGGING_CONFIG["format"],
-    handlers=[
-        logging.FileHandler(LOGGING_CONFIG["file"]),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("main")
+logger = setup_logger("test_etl", "test_etl")
 
 
 # Test Functions

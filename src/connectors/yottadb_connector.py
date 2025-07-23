@@ -4,6 +4,7 @@ import csv
 import io
 import time
 from typing import Dict, Any, List, Optional, Tuple
+from src.config.settings import setup_logger
 
 class YottaDBConnector:
     """Connector for YottaDB source system (qMS) via HTTP API."""
@@ -11,7 +12,7 @@ class YottaDBConnector:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.connection = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "connectors")
         self.source_id = 1  # qMS
         self.api_url = config.get('api_url', 'http://192.168.156.43/cgi-bin/qms_export_pat')
         self.timeout = config.get('timeout', 300)  # 5 minutes default timeout

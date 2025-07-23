@@ -2,12 +2,13 @@ import logging
 import re
 from typing import Dict, Any, Optional
 from datetime import datetime
+from src.config.settings import setup_logger
 
 class FirebirdTransformer:
     """Transform raw Firebird data into standardized format."""
     
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__, "transformers")
     
     def normalize_document_number(self, document_number: Optional[str]) -> Optional[int]:
         """

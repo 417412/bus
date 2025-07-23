@@ -22,7 +22,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 sys.path.append(parent_dir)
 
 # Import configuration
-from src.config.settings import DATABASE_CONFIG, LOGGING_CONFIG
+from src.config.settings import DATABASE_CONFIG, LOGGING_CONFIG, setup_logger
 
 # Import connectors and repositories
 from src.connectors.postgres_connector import PostgresConnector
@@ -35,29 +35,8 @@ from src.repositories.yottadb_repository import YottaDBRepository
 # Import ETL components
 from src.etl.etl_service import ETLService
 
-# Set up logging
-def setup_logging(source_type: str):
-    """Set up logging with source-specific log files."""
-    os.makedirs("logs", exist_ok=True)
-    log_file = os.path.join("logs", f"etl_daemon_{source_type}.log")
-    
-    # Clear existing handlers
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    logging.basicConfig(
-        level=getattr(logging, LOGGING_CONFIG.get("level", "INFO")),
-        format=LOGGING_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-
 # Global flag for graceful shutdown
 SHOULD_RUN = True
-
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -709,11 +688,9 @@ def main():
     args = parse_args()
     
     # Set up source-specific logging
-    setup_logging(args.source)
-    
-    # Now we can get the logger after logging is set up
+    log_file_key = f"etl_daemon_{args.source}"
     global logger
-    logger = logging.getLogger("etl_daemon")
+    logger = setup_logger("etl_daemon", log_file_key)
     
     setup_signal_handlers()
     
