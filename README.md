@@ -12,7 +12,16 @@ This ETL Bus service facilitates seamless data integration between different med
 ## Architecture
 
 The system follows a modular architecture with clear separation of concerns:
-src/ ├── config/ # Configuration settings ├── connectors/ # Database/API connection handlers ├── repositories/ # Data access layer ├── etl/ # ETL services and transformers ├── daemons/ # Background service processes ├── triggers/ # Database triggers for patient matching └── systemd/ # Service configuration files
+src/ 
+├── config/ # Configuration settings 
+├── connectors/ # Database/API connection handlers 
+├── repositories/ # Data access layer 
+├── etl/ # ETL services and transformers 
+├── daemons/ # Background service processes 
+├── triggers/ # Database triggers for patient matching 
+└── utils/ # Utility functions and helpers
+└── systemd/ # Service configuration files
+
 
 
 ## Key Features
