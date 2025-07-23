@@ -93,10 +93,22 @@ class YottaDBTransformer:
                 year = digits[0:4]
                 month = digits[4:6]
                 day = digits[6:8]
+                
+                # Basic validation
+                if int(month) < 1 or int(month) > 12:
+                    self.logger.warning(f"Invalid month in date: {date_str}")
+                    return None
+                if int(day) < 1 or int(day) > 31:
+                    self.logger.warning(f"Invalid day in date: {date_str}")
+                    return None
+                    
                 return f"{year}-{month}-{day}"
-            except Exception:
+            except (ValueError, IndexError):
+                self.logger.warning(f"Error parsing date: {date_str}")
                 return None
-        return None
+        else:
+            self.logger.warning(f"Date string doesn't have 8 digits: {date_str}")
+            return None
     
     def map_document_type(self, doc_type: Optional[str]) -> int:
         """
@@ -112,7 +124,38 @@ class YottaDBTransformer:
             return 1  # Default to passport
             
         # Get mapped type or default to "Иные документы" (17)
-        return self.document_type_map.get(str(doc_type), 17)
+        mapped_type = self.document_type_map.get(str(doc_type), 17)
+        
+        if mapped_type == 17 and str(doc_type) not in self.document_type_map:
+            self.logger.warning(f"Unknown document type {doc_type}, mapping to 'Иные документы' (17)")
+            
+        return mapped_type
+    
+    def clean_phone_number(self, phone: Optional[str]) -> Optional[str]:
+        """
+        Clean and normalize phone number.
+        
+        Args:
+            phone: Raw phone number
+            
+        Returns:
+            Cleaned phone number with only digits or None
+        """
+        if not phone:
+            return None
+            
+        # Extract only digits
+        digits = re.sub(r'\D', '', phone)
+        
+        # Return None if no digits found
+        if not digits:
+            return None
+            
+        # Remove leading 8 if phone starts with 8 and has 11 digits (Russian format)
+        if len(digits) == 11 and digits.startswith('8'):
+            digits = '7' + digits[1:]
+            
+        return digits
         
     def transform_patient(self, raw_patient: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -125,13 +168,19 @@ class YottaDBTransformer:
             Standardized patient record
         """
         try:
-            # Extract fields that need transformation
+            # Extract and transform fields
             birthdate = self.normalize_date(raw_patient.get('birthdate'))
             doc_type = self.map_document_type(raw_patient.get('documenttypes'))
             document_number = self.normalize_document_number(
                 raw_patient.get('series'), 
                 raw_patient.get('number')
             )
+            
+            # Clean phone number
+            telephone = self.clean_phone_number(raw_patient.get('telephone'))
+            
+            # Use login_email as primary email, fallback to email
+            email = raw_patient.get('login_email') or raw_patient.get('email')
             
             # Build standardized patient record
             return {
@@ -144,16 +193,20 @@ class YottaDBTransformer:
                 "birthdate": birthdate,
                 "documenttypes": doc_type,
                 "document_number": document_number,
-                "email": raw_patient.get('email'),
-                "telephone": raw_patient.get('telephone'),
-                # No password for qMS patients
+                "email": email,
+                "telephone": telephone,
+                # No password for qMS patients via HTTP API
+                "his_password": None
             }
         except Exception as e:
-            self.logger.error(f"Error transforming patient: {e}")
+            self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
             # Return a minimal record with the hisnumber and source to maintain data flow
             return {
                 "hisnumber": raw_patient.get('hisnumber', ''),
                 "source": raw_patient.get('source', 1),
                 "businessunit": raw_patient.get('businessunit', 1),
-                "documenttypes": 17  # Default to "Иные документы" for error cases
+                "documenttypes": 17,  # Default to "Иные документы" for error cases
+                "lastname": raw_patient.get('lastname'),
+                "name": raw_patient.get('name'),
+                "surname": raw_patient.get('surname')
             }

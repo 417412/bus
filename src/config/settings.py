@@ -19,8 +19,10 @@ DATABASE_CONFIG = {
         "debug": False
     },
     "YottaDB": {
-        # YottaDB specific configuration
-        "connection_info": "your_connection_info"
+        # YottaDB specific configuration for HTTP API
+        "api_url": "http://192.168.156.43/cgi-bin/qms_export_pat",
+        "timeout": 3000,
+        "delimiter": "|"
     }
 }
 

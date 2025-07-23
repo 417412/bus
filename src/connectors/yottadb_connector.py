@@ -1,136 +1,163 @@
 import logging
-import re
+import requests
 import csv
-import os
+import io
 from typing import Dict, Any, List, Optional, Tuple
 
 class YottaDBConnector:
-    """Connector for YottaDB source system (qMS)."""
+    """Connector for YottaDB source system (qMS) via HTTP API."""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.connection = None
         self.logger = logging.getLogger(__name__)
         self.source_id = 1  # qMS
-        self.csv_file_path = config.get('csv_file_path', 'data/qms_patients.csv')
+        self.api_url = config.get('api_url', 'http://192.168.156.43/cgi-bin/qms_export_pat')
+        self.timeout = config.get('timeout', 30)
         self.delimiter = config.get('delimiter', '|')
         
     def connect(self) -> bool:
         """
-        Verify CSV file exists and is readable.
-        For YottaDB connector, this just checks if the CSV file exists.
+        Test connection to YottaDB API endpoint.
         """
         try:
-            if not os.path.exists(self.csv_file_path):
-                self.logger.error(f"CSV file not found: {self.csv_file_path}")
+            self.logger.info(f"Testing connection to YottaDB API: {self.api_url}")
+            
+            # Test the API endpoint with a small timeout
+            response = requests.get(self.api_url, timeout=5)
+            
+            if response.status_code == 200:
+                # Check if we get some data
+                content = response.text.strip()
+                if content:
+                    lines = content.split('\n')
+                    self.logger.info(f"Successfully connected to YottaDB API. Got {len(lines)} records.")
+                    return True
+                else:
+                    self.logger.warning("API responded but returned empty content")
+                    return False
+            else:
+                self.logger.error(f"API returned status code: {response.status_code}")
                 return False
                 
-            # Test if we can open and read the file
-            with open(self.csv_file_path, 'r', encoding='utf-8') as f:
-                # Try to read the first line
-                first_line = f.readline()
-                if not first_line:
-                    self.logger.error(f"CSV file is empty: {self.csv_file_path}")
-                    return False
-            
-            self.logger.info(f"Successfully connected to CSV file: {self.csv_file_path}")
-            return True
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"Connection error to YottaDB API: {str(e)}")
+            return False
+        except requests.exceptions.Timeout as e:
+            self.logger.error(f"Timeout connecting to YottaDB API: {str(e)}")
+            return False
         except Exception as e:
-            self.logger.error(f"Error connecting to CSV file: {str(e)}")
+            self.logger.error(f"Error connecting to YottaDB API: {str(e)}")
             return False
             
     def disconnect(self) -> None:
         """
-        For CSV files, there's no actual connection to close.
+        For HTTP API, there's no persistent connection to close.
         """
-        self.logger.debug("Disconnected from CSV file (no-op)")
-            
-    def fetch_patients(self, batch_size: int = 100, last_processed_row: int = 0) -> List[Dict[str, Any]]:
+        self.logger.debug("Disconnected from YottaDB API (no-op)")
+    
+    def fetch_all_patients(self) -> List[Dict[str, Any]]:
         """
-        Fetch raw patient records from CSV file without transformation.
+        Fetch all patient records from YottaDB API.
         
-        Args:
-            batch_size: Maximum number of records to fetch
-            last_processed_row: Last processed row number to support incremental loading
-            
         Returns:
             List of raw patient records
         """
         patients = []
         try:
-            with open(self.csv_file_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f, delimiter=self.delimiter)
-                
-                # Skip header row if it exists
-                header = next(reader, None)
-                
-                # Skip already processed rows
-                for _ in range(last_processed_row):
-                    next(reader, None)
-                
-                # Process batch_size records
-                row_count = 0
-                for row in reader:
-                    if row_count >= batch_size:
-                        break
-                        
-                    if len(row) < 10:  # Make sure we have all required fields
-                        self.logger.warning(f"Skipping row with insufficient fields: {row}")
+            self.logger.info(f"Fetching all patients from YottaDB API: {self.api_url}")
+            
+            response = requests.get(self.api_url, timeout=self.timeout)
+            
+            if response.status_code != 200:
+                self.logger.error(f"API returned status code: {response.status_code}")
+                return []
+            
+            content = response.text.strip()
+            if not content:
+                self.logger.warning("API returned empty content")
+                return []
+            
+            # Parse the pipe-delimited data
+            lines = content.split('\n')
+            self.logger.info(f"Processing {len(lines)} lines from API response")
+            
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    # Split by delimiter
+                    fields = line.split(self.delimiter)
+                    
+                    # Ensure we have at least the minimum required fields
+                    if len(fields) < 10:
+                        self.logger.warning(f"Line {line_num}: Insufficient fields ({len(fields)}): {line}")
                         continue
                     
-                    # Extract fields without transformation
-                    # Format: hisnumber|lastname|name|surname|birthdate|documenttypes|series|number|email|telephone
+                    # Extract fields according to the specification:
+                    # 1. hisnumber_qms, 2. lastname, 3. name, 4. surname, 5. birthdate,
+                    # 6. document type, 7. document series, 8. document number, 
+                    # 9. email_feedback, 10. telephone, 11. login_email (optional)
                     patient = {
-                        "hisnumber": row[0] if len(row) > 0 else "",
-                        "lastname": row[1] if len(row) > 1 else "",
-                        "name": row[2] if len(row) > 2 else "",
-                        "surname": row[3] if len(row) > 3 else "",
-                        "birthdate": row[4] if len(row) > 4 else "",
-                        "documenttypes": row[5] if len(row) > 5 else "",
-                        "series": row[6] if len(row) > 6 else "",
-                        "number": row[7] if len(row) > 7 else "",
-                        "email": row[8] if len(row) > 8 else "",
-                        "telephone": row[9] if len(row) > 9 else "",
+                        "hisnumber": fields[0].strip() if len(fields) > 0 else "",
+                        "lastname": fields[1].strip() if len(fields) > 1 else "",
+                        "name": fields[2].strip() if len(fields) > 2 else "",
+                        "surname": fields[3].strip() if len(fields) > 3 else "",
+                        "birthdate": fields[4].strip() if len(fields) > 4 else "",
+                        "documenttypes": fields[5].strip() if len(fields) > 5 else "",
+                        "series": fields[6].strip() if len(fields) > 6 else "",
+                        "number": fields[7].strip() if len(fields) > 7 else "",
+                        "email": fields[8].strip() if len(fields) > 8 else "",
+                        "telephone": fields[9].strip() if len(fields) > 9 else "",
+                        "login_email": fields[10].strip() if len(fields) > 10 else "",
                         "source": self.source_id,  # Add source ID
                         "businessunit": 1,  # Default businessunit for qMS
                     }
                     
                     patients.append(patient)
-                    row_count += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Error parsing line {line_num}: {line} - {str(e)}")
+                    continue
             
-            self.logger.info(f"Fetched {len(patients)} raw patients from YottaDB (qMS)")
+            self.logger.info(f"Successfully fetched {len(patients)} patients from YottaDB API")
             return patients
+            
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"Connection error fetching patients from YottaDB API: {str(e)}")
+            return []
+        except requests.exceptions.Timeout as e:
+            self.logger.error(f"Timeout fetching patients from YottaDB API: {str(e)}")
+            return []
         except Exception as e:
-            self.logger.error(f"Error fetching patients from YottaDB (qMS): {str(e)}")
+            self.logger.error(f"Error fetching patients from YottaDB API: {str(e)}")
             return []
     
     def get_total_patient_count(self) -> int:
         """
-        Get the total number of patients in the CSV file.
+        Get the total number of patients by calling the API.
         
         Returns:
             Total patient count
         """
         try:
-            with open(self.csv_file_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f, delimiter=self.delimiter)
-                
-                # Skip header row if it exists
-                next(reader, None)
-                
-                # Count rows
-                count = sum(1 for _ in reader)
-                
+            # For HTTP API, we need to fetch all data to count
+            # This could be optimized with a separate count endpoint if available
+            patients = self.fetch_all_patients()
+            count = len(patients)
+            
             self.logger.info(f"Total patient count in YottaDB (qMS): {count}")
             return count
         except Exception as e:
-            self.logger.error(f"Error getting patient count from YottaDB (qMS): {str(e)}")
+            self.logger.error(f"Error getting patient count from YottaDB: {str(e)}")
             return 0
     
     def execute_query(self, query: str, params: tuple = None) -> Tuple[List[Any], List[str]]:
         """
         Mock implementation to maintain API compatibility with other connectors.
-        This is a no-op for CSV-based connector.
+        This is a no-op for HTTP API-based connector.
         
         Returns:
             Empty tuple to indicate no results
