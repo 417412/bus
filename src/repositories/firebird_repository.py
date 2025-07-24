@@ -109,6 +109,8 @@ class FirebirdRepository:
         Returns:
             Tuple of (list of dictionaries with patient delta data, count of processed records)
         """
+        self.logger.info(f"=== Starting get_patient_deltas with batch_size={batch_size} ===")
+        
         # Query to get deltas that haven't been processed yet
         query = """
             SELECT
@@ -142,23 +144,46 @@ class FirebirdRepository:
         # Add limit if needed
         if batch_size:
             query += f" ROWS {batch_size}"
+        
+        self.logger.info(f"Executing delta query with batch_size={batch_size}")
+        self.logger.debug(f"Query: {query}")
             
         # Execute query
         try:
             rows, columns = self.connector.execute_query(query)
             
+            self.logger.info(f"✓ Delta query executed successfully, returned {len(rows)} raw records")
+            self.logger.info(f"Columns: {columns}")
+            
+            if not rows:
+                self.logger.info("No delta records found, returning empty results")
+                return [], 0
+            
+            # Log first few raw records
+            for i, row in enumerate(rows[:3]):
+                row_dict = dict(zip(columns, row))
+                self.logger.info(f"Raw record {i}: hisnumber={row_dict.get('hisnumber')}, operation={row_dict.get('operation')}")
+            
             # Get unique records (handle duplicates by using the latest delta record)
             patient_deltas = {}
             processed_pcodes = []
             
+            self.logger.info("Processing records to get unique deltas...")
+            
             # Process rows in reverse to ensure we get the latest delta for each patient
-            for row in reversed(rows):
+            for i, row in enumerate(reversed(rows)):
                 row_dict = dict(zip(columns, row))
                 hisnumber = row_dict.get('hisnumber')
+                operation = row_dict.get('operation')
+                
+                self.logger.debug(f"Processing row {i}: hisnumber={hisnumber}, operation={operation}")
                 
                 # Only add this record if we haven't seen this hisnumber yet
                 if hisnumber and hisnumber not in patient_deltas:
                     patient_deltas[hisnumber] = row_dict
+                    self.logger.debug(f"✓ Added unique delta for hisnumber {hisnumber} with operation {operation}")
+                else:
+                    self.logger.debug(f"⚠ Skipped duplicate delta for hisnumber {hisnumber} with operation {operation}")
                 
                 # Keep track of all pcodes for marking as processed
                 if hisnumber and hisnumber not in processed_pcodes:
@@ -166,20 +191,33 @@ class FirebirdRepository:
             
             # Convert dictionary to list
             unique_deltas = list(patient_deltas.values())
-            self.logger.info(f"Retrieved {len(rows)} delta records, {len(unique_deltas)} unique patients")
+            
+            self.logger.info(f"✓ Processed {len(rows)} delta records into {len(unique_deltas)} unique patients")
+            self.logger.info(f"PCodes to mark as processed: {len(processed_pcodes)} - {processed_pcodes[:5]}")
+            
+            # Log some unique deltas for verification
+            for i, delta in enumerate(unique_deltas[:3]):
+                self.logger.info(f"Unique delta {i}: hisnumber={delta.get('hisnumber')}, operation={delta.get('operation')}, lastname={delta.get('lastname')}")
             
             # Mark these records as processed only if we have any
+            processed_count = 0
             if processed_pcodes:
+                self.logger.info(f"Marking {len(processed_pcodes)} pcodes as processed...")
                 processed_count = self._mark_deltas_as_processed(processed_pcodes)
+                self.logger.info(f"✓ Marked {processed_count} records as processed")
             else:
-                processed_count = 0
-                self.logger.info("No pcodes to mark as processed")
+                self.logger.warning("No pcodes to mark as processed (this shouldn't happen if we have deltas)")
             
+            self.logger.info(f"=== get_patient_deltas completed: returning {len(unique_deltas)} deltas, {processed_count} processed ===")
             return unique_deltas, processed_count
+            
         except Exception as e:
-            self.logger.error(f"Error fetching patient deltas from Firebird: {str(e)}")
+            self.logger.error(f"✗ Error fetching patient deltas from Firebird: {str(e)}")
+            self.logger.error(f"Failed query: {query}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return [], 0
-
+        
     def _mark_deltas_as_processed(self, pcodes: List[str]) -> int:
         """
         Mark delta records as processed in the Firebird database.

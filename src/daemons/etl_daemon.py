@@ -575,7 +575,7 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
     """Perform delta synchronization from source to PostgreSQL."""
     source_name = etl_service.source_repo.__class__.__name__
     
-    logger.info(f"Starting delta synchronization from {source_name}")
+    logger.info(f"=== Starting delta synchronization from {source_name} ===")
     start_time = datetime.now()
     status = {
         "operation": "delta_sync",
@@ -596,26 +596,34 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
     
     try:
         # Get delta records
+        logger.info(f"Calling get_patient_deltas with max_records={max_records}")
         delta_records, processed_count = etl_service.source_repo.get_patient_deltas(batch_size=max_records)
+        
+        logger.info(f"✓ get_patient_deltas returned: {len(delta_records)} delta records, {processed_count} processed count")
         
         status["total_delta_records"] = processed_count
         status["unique_patients"] = len(delta_records)
         
         if not delta_records:
-            logger.info("No delta records to process")
+            logger.info("No delta records to process - finishing delta sync")
             status["status"] = "completed"
             status["end_time"] = datetime.now()
             status["duration"] = (status["end_time"] - start_time).total_seconds()
             return status
+        
+        logger.info(f"Processing {len(delta_records)} delta records...")
         
         # Group records by operation type
         inserts = []
         updates = []
         deletes = []
         
-        for raw_record in delta_records:
+        for i, raw_record in enumerate(delta_records):
             try:
                 operation = raw_record.get('operation', '').upper()
+                hisnumber = raw_record.get('hisnumber')
+                
+                logger.debug(f"Processing delta record {i}: hisnumber={hisnumber}, operation={operation}")
                 
                 # Remove the operation field (no delta_id in our schema)
                 record_copy = raw_record.copy()
@@ -627,20 +635,29 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
                 if operation == 'INSERT':
                     inserts.append(transformed_record)
                     status["operations"]["INSERT"] += 1
+                    logger.debug(f"Queued INSERT for {hisnumber}")
                 elif operation == 'UPDATE':
                     updates.append(transformed_record)
                     status["operations"]["UPDATE"] += 1
+                    logger.debug(f"Queued UPDATE for {hisnumber}")
                 elif operation == 'DELETE':
                     deletes.append(transformed_record)
                     status["operations"]["DELETE"] += 1
+                    logger.debug(f"Queued DELETE for {hisnumber}")
+                else:
+                    logger.warning(f"Unknown operation '{operation}' for hisnumber {hisnumber}")
+                    
             except Exception as e:
-                logger.error(f"Error transforming delta record: {e}")
+                logger.error(f"Error transforming delta record {i}: {e}")
                 status["error_count"] += 1
+        
+        logger.info(f"Grouped operations: {len(inserts)} inserts, {len(updates)} updates, {len(deletes)} deletes")
         
         # Process inserts and updates
         success_count = 0
         
         # Process inserts
+        logger.info(f"Processing {len(inserts)} INSERT operations...")
         for record in inserts:
             try:
                 hisnumber = record.get('hisnumber')
@@ -651,23 +668,35 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
                     logger.info(f"Patient {hisnumber} already exists, treating as UPDATE instead of INSERT")
                     if etl_service.target_repo.upsert_patient(record):
                         success_count += 1
+                        logger.debug(f"✓ Upserted existing patient {hisnumber}")
+                    else:
+                        logger.error(f"✗ Failed to upsert existing patient {hisnumber}")
                 else:
                     if etl_service.target_repo.insert_patient(record):
                         success_count += 1
+                        logger.debug(f"✓ Inserted new patient {hisnumber}")
+                    else:
+                        logger.error(f"✗ Failed to insert new patient {hisnumber}")
             except Exception as e:
                 logger.error(f"Error inserting patient {record.get('hisnumber')}: {e}")
                 status["error_count"] += 1
         
         # Process updates
+        logger.info(f"Processing {len(updates)} UPDATE operations...")
         for record in updates:
             try:
+                hisnumber = record.get('hisnumber')
                 if etl_service.target_repo.upsert_patient(record):
                     success_count += 1
+                    logger.debug(f"✓ Updated patient {hisnumber}")
+                else:
+                    logger.error(f"✗ Failed to update patient {hisnumber}")
             except Exception as e:
                 logger.error(f"Error updating patient {record.get('hisnumber')}: {e}")
                 status["error_count"] += 1
         
         # Process deletes
+        logger.info(f"Processing {len(deletes)} DELETE operations...")
         for record in deletes:
             try:
                 hisnumber = record.get('hisnumber')
@@ -675,6 +704,9 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
                 if hisnumber and source:
                     if etl_service.target_repo.mark_patient_deleted(hisnumber, source):
                         success_count += 1
+                        logger.debug(f"✓ Marked patient {hisnumber} as deleted")
+                    else:
+                        logger.error(f"✗ Failed to mark patient {hisnumber} as deleted")
             except Exception as e:
                 logger.error(f"Error deleting patient {record.get('hisnumber')}: {e}")
                 status["error_count"] += 1
@@ -690,12 +722,14 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
         status["duration"] = (status["end_time"] - start_time).total_seconds()
         status["status"] = "completed"
         
-        logger.info(f"Delta sync completed, processed {success_count}/{status['processed_records']} "
-                    f"records in {status['duration']:.2f} seconds")
+        logger.info(f"✓ Delta sync completed: processed {success_count}/{status['processed_records']} records in {status['duration']:.2f} seconds")
+        logger.info(f"Operations summary: {status['operations']}")
         
         return status
     except Exception as e:
-        logger.error(f"Error during delta sync: {e}")
+        logger.error(f"✗ Error during delta sync: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         status["end_time"] = datetime.now()
         status["duration"] = (status["end_time"] - start_time).total_seconds()
         status["status"] = "failed"
