@@ -204,7 +204,18 @@ class FirebirdRepository:
             if processed_pcodes:
                 self.logger.info(f"Marking {len(processed_pcodes)} pcodes as processed...")
                 processed_count = self._mark_deltas_as_processed(processed_pcodes)
-                self.logger.info(f"✓ Marked {processed_count} records as processed")
+                
+                # Verify the results
+                if processed_count > 0:
+                    verified_processed, verified_total = self._verify_processed_records(processed_pcodes)
+                    self.logger.info(f"✓ Marked {processed_count} records as processed")
+                    self.logger.info(f"✓ Verification: {verified_processed}/{verified_total} records confirmed processed")
+                    
+                    if verified_processed < len(processed_pcodes):
+                        self.logger.warning(f"⚠ Some records may not have been marked as processed: "
+                                        f"{verified_processed}/{len(processed_pcodes)}")
+                else:
+                    self.logger.error("✗ Failed to mark any records as processed due to deadlock/error")
             else:
                 self.logger.warning("No pcodes to mark as processed (this shouldn't happen if we have deltas)")
             
@@ -220,7 +231,7 @@ class FirebirdRepository:
         
     def _mark_deltas_as_processed(self, pcodes: List[str]) -> int:
         """
-        Mark delta records as processed in the Firebird database.
+        Mark delta records as processed in the Firebird database with deadlock handling.
         
         Args:
             pcodes: List of pcodes (hisnumbers) to mark as processed
@@ -246,74 +257,178 @@ class FirebirdRepository:
         if not pcodes:
             self.logger.warning("Empty pcodes list, nothing to mark as processed")
             return 0
+        
+        # Deadlock retry logic
+        max_retries = 3
+        retry_delay = 1  # Start with 1 second delay
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"Attempt {attempt + 1}/{max_retries} to mark {len(pcodes)} records as processed")
+                
+                # Execute update in smaller batches to reduce deadlock chance
+                batch_size = 100  # Smaller batch size to reduce lock contention
+                total_processed = 0
+                
+                for i in range(0, len(pcodes), batch_size):
+                    batch = pcodes[i:i + batch_size]
+                    if not batch:
+                        continue
+                    
+                    # Process this batch
+                    batch_processed = self._update_batch_processed_status(batch, attempt + 1)
+                    total_processed += batch_processed
+                    
+                    # Small delay between batches to reduce contention
+                    if i + batch_size < len(pcodes):
+                        import time
+                        time.sleep(0.1)
+                
+                self.logger.info(f"Successfully marked {total_processed} delta records as processed on attempt {attempt + 1}")
+                return total_processed
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                if 'deadlock' in error_msg or 'concurrent' in error_msg or 'lock' in error_msg:
+                    self.logger.warning(f"Deadlock/lock conflict on attempt {attempt + 1}/{max_retries}: {e}")
+                    
+                    if attempt < max_retries - 1:
+                        # Exponential backoff with jitter
+                        import time
+                        import random
+                        delay = retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                        self.logger.info(f"Retrying in {delay:.2f} seconds...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.logger.error(f"Failed to mark deltas as processed after {max_retries} attempts due to deadlock")
+                        return 0
+                else:
+                    # Non-deadlock error, don't retry
+                    self.logger.error(f"Non-deadlock error marking deltas as processed: {e}")
+                    return 0
+        
+        return 0
+    
+    def _update_batch_processed_status(self, batch: List[str], attempt: int) -> int:
+        """
+        Update a batch of records with processed status.
+        
+        Args:
+            batch: List of pcodes for this batch
+            attempt: Current attempt number (for logging)
             
+        Returns:
+            Number of records successfully updated
+        """
+        if not batch:
+            return 0
+        
         try:
-            # Execute update in batches to avoid query size limits
-            batch_size = 500
-            total_processed = 0
-            
-            # Debug log the input
-            self.logger.debug(f"Starting to process {len(pcodes)} pcodes: {pcodes[:5]}...")
-            
-            for i in range(0, len(pcodes), batch_size):
-                batch = pcodes[i:i + batch_size]
-                if not batch:
+            # For Firebird, construct the IN clause directly with values
+            value_list = []
+            for pcode in batch:
+                if pcode is None:
                     continue
                     
-                # For Firebird, construct the IN clause directly with values rather than placeholders
-                # Convert each value to a string representation suitable for SQL
-                value_list = []
-                for pcode in batch:
-                    if pcode is None:
-                        continue
-                        
-                    try:
-                        if isinstance(pcode, (int, float)):
-                            # For numeric values, don't use quotes
-                            value_list.append(str(int(pcode)))
-                        else:
-                            # For string values, use quotes and escape single quotes
-                            # Replace single quotes with two single quotes (SQL escaping)
-                            safe_value = str(pcode).replace("'", "''")
-                            value_list.append(f"'{safe_value}'")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to process pcode value: {pcode}, error: {e}")
-                        continue
-                
-                # Defensive check - make sure value_list is not empty
-                if not value_list:
-                    self.logger.warning(f"No valid values in batch, skipping")
+                try:
+                    if isinstance(pcode, (int, float)):
+                        # For numeric values, don't use quotes
+                        value_list.append(str(int(pcode)))
+                    else:
+                        # For string values, use quotes and escape single quotes
+                        safe_value = str(pcode).replace("'", "''")
+                        value_list.append(f"'{safe_value}'")
+                except Exception as e:
+                    self.logger.warning(f"Failed to process pcode value: {pcode}, error: {e}")
                     continue
-                    
-                # Join the values with commas
-                values_string = ", ".join(value_list)
-                    
-                # Construct the query with the values directly in the IN clause
-                query = f"""
-                    UPDATE Medscan_delta_clients
-                    SET processed = 'Y'
-                    WHERE pcode IN ({values_string});
-                """
-                
-                # Debug log the query (truncated for large queries)
-                query_log = query
-                if len(query_log) > 1000:
-                    query_log = query_log[:500] + "..." + query_log[-500:]
-                self.logger.debug(f"Executing query: {query_log}")
-                
-                # Execute the query without parameters since we've already included them directly
-                # For UPDATE queries, execute_query returns (None, None)
-                # We don't need to check the return values here
-                self.connector.execute_query(query)
-                total_processed += len(value_list)
             
-            self.logger.info(f"Marked {total_processed} delta records as processed")
-            return total_processed
+            if not value_list:
+                self.logger.warning(f"No valid values in batch, skipping")
+                return 0
+            
+            # Join the values with commas
+            values_string = ", ".join(value_list)
+            
+            # Use a more specific update with ORDER BY to reduce deadlock chance
+            # Also add a row limit to process records in a predictable order
+            query = f"""
+                UPDATE Medscan_delta_clients
+                SET processed = 'Y'
+                WHERE pcode IN ({values_string})
+                AND processed = 'N'
+            """
+            
+            self.logger.debug(f"Attempt {attempt}: Updating batch of {len(value_list)} records")
+            
+            # Execute the query
+            rows, columns = self.connector.execute_query(query)
+            
+            # For Firebird, we can't easily get the number of affected rows from UPDATE
+            # So we'll return the number of pcodes we attempted to update
+            return len(value_list)
             
         except Exception as e:
-            self.logger.error(f"Error marking deltas as processed: {str(e)}")
-            return 0
+            # Re-raise the exception so the retry logic can handle it
+            raise e
     
+    def _verify_processed_records(self, pcodes: List[str]) -> Tuple[int, int]:
+        """
+        Verify how many records were actually marked as processed.
+        
+        Args:
+            pcodes: List of pcodes to check
+            
+        Returns:
+            Tuple of (processed_count, total_count)
+        """
+        if not pcodes:
+            return 0, 0
+        
+        try:
+            # Build the IN clause for verification
+            value_list = []
+            for pcode in pcodes:
+                if pcode is None:
+                    continue
+                try:
+                    if isinstance(pcode, (int, float)):
+                        value_list.append(str(int(pcode)))
+                    else:
+                        safe_value = str(pcode).replace("'", "''")
+                        value_list.append(f"'{safe_value}'")
+                except:
+                    continue
+            
+            if not value_list:
+                return 0, 0
+            
+            values_string = ", ".join(value_list)
+            
+            # Count processed vs total
+            query = f"""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN processed = 'Y' THEN 1 ELSE 0 END) as processed
+                FROM Medscan_delta_clients 
+                WHERE pcode IN ({values_string})
+            """
+            
+            rows, columns = self.connector.execute_query(query)
+            
+            if rows and len(rows[0]) >= 2:
+                total = rows[0][0]
+                processed = rows[0][1] or 0
+                self.logger.debug(f"Verification: {processed}/{total} records marked as processed")
+                return processed, total
+            
+            return 0, 0
+            
+        except Exception as e:
+            self.logger.error(f"Error verifying processed records: {e}")
+            return 0, 0
+
     def get_last_processed_id(self) -> Optional[str]:
         """Get last processed patient ID from state file."""
         try:
