@@ -149,15 +149,52 @@ class FirebirdRepository:
         self.logger.debug(f"Query: {query}")
             
         # Execute query
+        # Execute query
         try:
             rows, columns = self.connector.execute_query(query)
             
-            self.logger.info(f"✓ Delta query executed successfully, returned {len(rows)} raw records")
+            # Debug the rows object
+            self.logger.info(f"✓ Delta query executed successfully")
+            self.logger.info(f"Type of rows: {type(rows)}")
+            self.logger.info(f"len(rows): {len(rows)}")
+            self.logger.info(f"bool(rows): {bool(rows)}")
+            self.logger.info(f"rows is None: {rows is None}")
             self.logger.info(f"Columns: {columns}")
             
+            # Check if rows is a list/tuple and what's in it
+            if hasattr(rows, '__iter__'):
+                self.logger.info(f"rows is iterable")
+                try:
+                    rows_list = list(rows)
+                    self.logger.info(f"rows converted to list: {len(rows_list)} items")
+                    if rows_list:
+                        self.logger.info(f"First row: {rows_list[0]}")
+                        self.logger.info(f"Type of first row: {type(rows_list[0])}")
+                        self.logger.info(f"Length of first row: {len(rows_list[0]) if hasattr(rows_list[0], '__len__') else 'N/A'}")
+                except Exception as e:
+                    self.logger.error(f"Error converting rows to list: {e}")
+            
+            # Try to iterate through rows manually
+            self.logger.info("Attempting to iterate through rows:")
+            try:
+                count = 0
+                for i, row in enumerate(rows):
+                    count += 1
+                    if i < 3:  # Only log first 3
+                        self.logger.info(f"Row {i}: {row} (type: {type(row)}, len: {len(row) if hasattr(row, '__len__') else 'N/A'})")
+                    if i >= 10:  # Don't log too many
+                        break
+                self.logger.info(f"Total rows found by iteration: {count}")
+            except Exception as e:
+                self.logger.error(f"Error iterating through rows: {e}")
+            
+            # Original check
             if not rows:
                 self.logger.info("No delta records found, returning empty results")
                 return [], 0
+            
+            # At this point, let's see what we actually have
+            self.logger.info(f"After 'if not rows' check - proceeding with processing")
             
             # Log first few raw records
             for i, row in enumerate(rows[:3]):

@@ -147,14 +147,6 @@ charset = {self.config.get('charset', 'cp1251')}
     def execute_query(self, query: str, params: tuple = None) -> Tuple[List[Any], List[str]]:
         """
         Execute a query and return the results with column names.
-        
-        Args:
-            query: SQL query to execute
-            params: Parameters for the query
-            
-        Returns:
-            For SELECT queries: Tuple of (rows, column_names)
-            For non-SELECT queries: Tuple of (None, None)
         """
         if not self.connection:
             raise Exception("Not connected to database")
@@ -164,14 +156,23 @@ charset = {self.config.get('charset', 'cp1251')}
             cursor.execute(query, params or ())
             
             # Determine if this is a SELECT query by checking if cursor.description exists
-            # For non-SELECT queries (INSERT, UPDATE, DELETE), description will be None
             if cursor.description:
                 rows = cursor.fetchall()
                 column_names = [desc[0].lower() for desc in cursor.description]
+                
+                # Debug logging
+                self.logger.debug(f"Query executed: {query[:100]}...")
+                self.logger.debug(f"Rows returned: {len(rows) if rows else 0}")
+                self.logger.debug(f"Column names: {column_names}")
+                self.logger.debug(f"Type of rows: {type(rows)}")
+                
+                # Additional debugging for the specific case
+                if hasattr(rows, '__len__') and len(rows) == 0 and rows:
+                    self.logger.warning(f"Strange case: len(rows)=0 but rows is truthy. rows={rows}")
+                
                 return rows, column_names
             else:
                 # For non-SELECT queries, return None for both rows and column_names
-                # This way we can tell it's a non-SELECT query by checking if rows is None
                 self.connection.commit()
                 return None, None
     
