@@ -17,22 +17,18 @@ from typing import List, Dict, Any, Optional
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(parent_dir)
 
-# Import configuration
-from src.config.settings import DATABASE_CONFIG, LOGGING_CONFIG
+# Import configuration with encrypted password support
+from src.config.settings import LOGGING_CONFIG, setup_logger, get_decrypted_database_config
 
 # Set up logging
-logging.basicConfig(
-    level=getattr(logging, LOGGING_CONFIG.get("level", "INFO")),
-    format=LOGGING_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("clear_database")
+logger = setup_logger("clear_database", "general")
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
+    # Get decrypted database config for defaults
+    db_config = get_decrypted_database_config()["PostgreSQL"]
+    
     parser = argparse.ArgumentParser(
         description="Clear the database for testing purposes"
     )
@@ -49,32 +45,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--database", 
         type=str, 
-        default=DATABASE_CONFIG["PostgreSQL"]["database"],
-        help=f"Database name (default: {DATABASE_CONFIG['PostgreSQL']['database']})"
+        default=db_config["database"],
+        help=f"Database name (default: {db_config['database']})"
     )
     parser.add_argument(
         "--user", 
         type=str, 
-        default=DATABASE_CONFIG["PostgreSQL"]["user"],
-        help=f"Database user (default: {DATABASE_CONFIG['PostgreSQL']['user']})"
+        default=db_config["user"],
+        help=f"Database user (default: {db_config['user']})"
     )
     parser.add_argument(
         "--password", 
         type=str, 
-        default=DATABASE_CONFIG["PostgreSQL"]["password"],
-        help="Database password"
+        default=None,  # Don't show the password in help
+        help="Database password (default: from configuration)"
     )
     parser.add_argument(
         "--host", 
         type=str, 
-        default=DATABASE_CONFIG["PostgreSQL"]["host"],
-        help=f"Database host (default: {DATABASE_CONFIG['PostgreSQL']['host']})"
+        default=db_config["host"],
+        help=f"Database host (default: {db_config['host']})"
     )
     parser.add_argument(
         "--port", 
         type=int, 
-        default=5432,
-        help="Database port (default: 5432)"
+        default=db_config.get("port", 5432),
+        help=f"Database port (default: {db_config.get('port', 5432)})"
     )
     parser.add_argument(
         "--dry-run", 
@@ -91,14 +87,31 @@ def parse_args() -> argparse.Namespace:
 
 def get_connection(args: argparse.Namespace) -> psycopg2.extensions.connection:
     """Create a database connection."""
-    conn = psycopg2.connect(
-        dbname=args.database,
-        user=args.user,
-        password=args.password,
-        host=args.host,
-        port=args.port
-    )
-    return conn
+    # If password not provided via command line, use decrypted password from config
+    password = args.password
+    if password is None:
+        db_config = get_decrypted_database_config()["PostgreSQL"]
+        password = db_config["password"]
+    
+    # Log connection attempt (without password)
+    logger.info(f"Connecting to database: {args.user}@{args.host}:{args.port}/{args.database}")
+    
+    try:
+        conn = psycopg2.connect(
+            dbname=args.database,
+            user=args.user,
+            password=password,
+            host=args.host,
+            port=args.port
+        )
+        logger.info("Successfully connected to PostgreSQL database")
+        return conn
+    except Exception as e:
+        logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
+        # Don't log the actual password in error messages
+        if 'password' in str(e).lower():
+            logger.error("Connection failed - check username, password, and database settings")
+        raise
 
 
 def get_tables_with_dependencies(conn: psycopg2.extensions.connection) -> Dict[str, List[str]]:
@@ -435,6 +448,28 @@ def reinitialize_reference_data(conn: psycopg2.extensions.connection, args: argp
     cursor.close()
 
 
+def test_connection_with_config():
+    """Test connection using default configuration."""
+    logger.info("Testing database connection with current configuration...")
+    
+    try:
+        # Use PostgresConnector to test the connection
+        from src.connectors.postgres_connector import PostgresConnector
+        
+        connector = PostgresConnector()  # Uses decrypted config automatically
+        
+        if connector.test_connection():
+            logger.info("✓ Database connection test successful")
+            return True
+        else:
+            logger.error("✗ Database connection test failed")
+            return False
+            
+    except Exception as e:
+        logger.error(f"✗ Database connection test failed: {e}")
+        return False
+
+
 def main():
     """Main function."""
     args = parse_args()
@@ -442,6 +477,12 @@ def main():
     # Validate arguments
     if args.reinitialize and args.keep_reference_data:
         logger.error("--reinitialize and --keep-reference-data cannot be used together")
+        return 1
+    
+    # Test connection first
+    if not test_connection_with_config():
+        logger.error("Cannot proceed - database connection failed")
+        logger.info("Check your database configuration with: python configurator.py --show-config")
         return 1
     
     if args.reinitialize:
@@ -452,7 +493,6 @@ def main():
     try:
         # Connect to the database
         conn = get_connection(args)
-        logger.info("Connected to the database")
         
         if args.reinitialize:
             # Full reinitialization: drop everything and recreate
@@ -486,9 +526,9 @@ def main():
             logger.info("Dry run completed. No changes were made.")
         else:
             if args.reinitialize:
-                logger.info("Database reinitialization completed successfully.")
+                logger.info("✓ Database reinitialization completed successfully.")
             else:
-                logger.info("Database cleanup completed successfully.")
+                logger.info("✓ Database cleanup completed successfully.")
         
     except Exception as e:
         logger.error(f"Error during database operation: {str(e)}")

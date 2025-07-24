@@ -24,3 +24,5 @@ logs/connectors.log
 logs/repositories.log
 logs/test_etl.log
 src/config/__pycache__/settings.cpython-311.pyc
+src/utils/__pycache__/password_manager.cpython-311.pyc
+logs/general.log
