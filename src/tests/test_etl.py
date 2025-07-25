@@ -3,7 +3,7 @@
 ETL integration tests for the medical system.
 
 This module tests the complete ETL process and database connectivity
-using the new architecture with encrypted password support.
+using the new architecture with encrypted password support and Patient model.
 """
 
 import os
@@ -34,6 +34,9 @@ from src.repositories.yottadb_repository import YottaDBRepository
 
 # Import ETL components
 from src.etl.etl_service import ETLService
+
+# Import Patient model
+from src.models.patient import Patient
 
 class TestETLIntegration:
     """Integration tests for the ETL system."""
@@ -159,6 +162,67 @@ class TestETLIntegration:
         finally:
             pg_connector.disconnect()
 
+    def test_patient_model(self):
+        """Test the Patient model functionality."""
+        self.logger.info("Testing Patient model...")
+        
+        # Test Firebird patient creation
+        firebird_raw = {
+            'hisnumber': '12345',
+            'source': 2,
+            'businessunit': 2,
+            'lastname': 'Тестов',
+            'name': 'Тест',
+            'surname': 'Тестович',
+            'birthdate': '1990-01-01',
+            'documenttypes': 1,
+            'document_number': 1234567890,
+            'email': 'test@example.com',
+            'telephone': '79991234567',
+            'his_password': 'password123',
+            'login_email': 'login@example.com'
+        }
+        
+        patient = Patient.from_firebird_raw(firebird_raw)
+        assert patient.hisnumber == '12345'
+        assert patient.source == 2
+        assert patient.get_source_name() == 'Инфоклиника'
+        assert patient.has_document()
+        assert patient.has_contact_info()
+        assert patient.has_login_credentials()
+        
+        # Test YottaDB patient creation
+        yottadb_raw = {
+            'hisnumber': '67890/A22',
+            'source': 1,
+            'businessunit': 1,
+            'lastname': 'Петров',
+            'name': 'Петр',
+            'surname': 'Петрович',
+            'birthdate': '1985-05-15',
+            'documenttypes': 1,
+            'document_number': 9876543210,
+            'email': 'contact@example.com',
+            'telephone': '79997654321',
+            'his_password': None,
+            'login_email': 'api_login@example.com'
+        }
+        
+        patient = Patient.from_yottadb_raw(yottadb_raw)
+        assert patient.hisnumber == '67890/A22'
+        assert patient.source == 1
+        assert patient.get_source_name() == 'qMS'
+        assert patient.has_document()
+        assert patient.has_contact_info()
+        assert patient.login_email == 'api_login@example.com'
+        
+        # Test conversion to dict
+        patient_dict = patient.to_patientsdet_dict()
+        assert 'uuid' not in patient_dict  # Should be removed for database insert
+        assert patient_dict['login_email'] == 'api_login@example.com'
+        
+        self.logger.info("Patient model tests passed")
+
     def test_document_type_handling(self):
         """Test document type handling in the database through the repository."""
         self.logger.info("Testing document type handling...")
@@ -178,8 +242,8 @@ class TestETLIntegration:
                 # Generate appropriate document number based on type
                 doc_number = self._generate_document_number(doc_type)
                 
-                # Create a qMS patient
-                qms_patient = {
+                # Create a qMS patient using Patient model
+                qms_raw = {
                     "hisnumber": f"QMS_DOCTEST_{doc_type}_{random.randint(1000, 9999)}",
                     "source": 1,  # qMS
                     "businessunit": 1,
@@ -191,14 +255,17 @@ class TestETLIntegration:
                     "document_number": doc_number,
                     "email": f"qms_doc{doc_type}@example.com",
                     "telephone": "79991234567",
-                    "his_password": None  # qMS doesn't have passwords via API
+                    "his_password": None,  # qMS doesn't have passwords via API
+                    "login_email": f"qms_login{doc_type}@api.com"
                 }
-                test_patients.append(qms_patient)
+                
+                patient = Patient.from_yottadb_raw(qms_raw)
+                test_patients.append(patient.to_patientsdet_dict())
                 
                 # Create an Infoclinica patient with different document number
                 doc_number2 = self._generate_document_number(doc_type)
                 
-                infoclinica_patient = {
+                infoclinica_raw = {
                     "hisnumber": f"IC_DOCTEST_{doc_type}_{random.randint(1000, 9999)}",
                     "source": 2,  # Инфоклиника
                     "businessunit": 2,  # Медскан
@@ -210,18 +277,22 @@ class TestETLIntegration:
                     "document_number": doc_number2,
                     "email": f"ic_doc{doc_type}@example.com",
                     "telephone": "79997654321",
-                    "his_password": "testpass123"  # Infoclinica has passwords
+                    "his_password": "testpass123",  # Infoclinica has passwords
+                    "login_email": f"ic_login{doc_type}@system.com"
                 }
-                test_patients.append(infoclinica_patient)
+                
+                patient = Patient.from_firebird_raw(infoclinica_raw)
+                test_patients.append(patient.to_patientsdet_dict())
             
             # Insert the test patients
             inserted_count = 0
-            for patient in test_patients:
-                if pg_repo.insert_patient(patient):
+            for patient_dict in test_patients:
+                if pg_repo.insert_patient(patient_dict):
                     inserted_count += 1
-                    doc_type_name = DOCUMENT_TYPES.get(patient["documenttypes"], "Unknown")
-                    source_name = "qMS" if patient["source"] == 1 else "Инфоклиника"
-                    self.logger.info(f"Inserted {source_name} patient with {doc_type_name} (ID: {patient['documenttypes']}), number: {patient['document_number']}")
+                    doc_type_name = DOCUMENT_TYPES.get(patient_dict["documenttypes"], "Unknown")
+                    source_name = "qMS" if patient_dict["source"] == 1 else "Инфоклиника"
+                    self.logger.info(f"Inserted {source_name} patient with {doc_type_name} (ID: {patient_dict['documenttypes']}), "
+                                   f"number: {patient_dict['document_number']}, login: {patient_dict.get('login_email', 'N/A')}")
             
             self.logger.info(f"Successfully inserted {inserted_count} out of {len(test_patients)} test patients with different document types")
             
@@ -232,8 +303,8 @@ class TestETLIntegration:
             pg_connector.disconnect()
 
     def test_firebird_etl_process(self):
-        """Test the Firebird ETL process using the new architecture."""
-        self.logger.info("Testing Firebird ETL process...")
+        """Test the Firebird ETL process using the Patient model."""
+        self.logger.info("Testing Firebird ETL process with Patient model...")
         
         # Create connectors with default decrypted config
         fb_connector = FirebirdConnector()
@@ -254,7 +325,7 @@ class TestETLIntegration:
             
             # Process a small batch
             batch_size = 5  # Small batch for testing
-            self.logger.info(f"Processing {batch_size} patients through Firebird ETL")
+            self.logger.info(f"Processing {batch_size} patients through Firebird ETL with Patient model")
             
             # Get a batch of patients
             patients = fb_repo.get_patients(batch_size=batch_size)
@@ -262,26 +333,34 @@ class TestETLIntegration:
             if not patients:
                 pytest.skip("No patients available in Firebird for testing")
             
-            # Process each patient
+            # Process each patient using the new Patient model approach
             success_count = 0
             for raw_patient in patients:
                 try:
-                    # Transform the patient data
-                    patient = etl_service.transformer.transform_patient(raw_patient)
+                    # Use ETL service's process_patient_record method (Patient model approach)
+                    patient = etl_service.process_patient_record(raw_patient)
+                    
+                    if not patient:
+                        self.logger.warning(f"Failed to process patient: {raw_patient.get('hisnumber')}")
+                        continue
+                    
+                    # Convert to dict for database operations
+                    patient_dict = patient.to_patientsdet_dict()
                     
                     # Check if the patient already exists
-                    hisnumber = patient.get('hisnumber')
-                    source = patient.get('source')
-                    
-                    if pg_repo.patient_exists(hisnumber, source):
-                        self.logger.debug(f"Patient {hisnumber} already exists, skipping")
+                    if pg_repo.patient_exists(patient.hisnumber, patient.source):
+                        self.logger.debug(f"Patient {patient.hisnumber} already exists, skipping")
                         success_count += 1  # Count as success since it's already there
                         continue
                         
                     # Insert the patient
-                    if pg_repo.insert_patient(patient):
+                    if pg_repo.insert_patient(patient_dict):
                         success_count += 1
-                        self.logger.debug(f"Successfully processed patient {hisnumber}")
+                        self.logger.debug(f"Successfully processed patient {patient.hisnumber}")
+                        
+                        # Verify login_email was properly stored
+                        if patient.login_email:
+                            self.logger.debug(f"  Login email: {patient.login_email}")
                     
                 except Exception as e:
                     self.logger.error(f"Error processing patient: {e}")
@@ -298,12 +377,12 @@ class TestETLIntegration:
 
     @pytest.mark.slow
     def test_yottadb_etl_process(self):
-        """Test YottaDB ETL process with full API fetch and sample processing.
+        """Test YottaDB ETL process with full API fetch and sample processing using Patient model.
         
         This test is marked as 'slow' because it takes 2-3 minutes to complete.
         Run with: pytest -m slow test_etl.py::TestETLIntegration::test_yottadb_etl_process
         """
-        self.logger.info("Testing YottaDB ETL process...")
+        self.logger.info("Testing YottaDB ETL process with Patient model...")
         self.logger.info("WARNING: This will fetch all data from YottaDB API (takes 2-3 minutes)")
         
         # Create connectors with default decrypted config
@@ -337,7 +416,7 @@ class TestETLIntegration:
             test_batch_size = min(10, len(all_patients))
             test_patients = random.sample(all_patients, test_batch_size)
             
-            self.logger.info(f"Testing ETL process with {test_batch_size} random patients...")
+            self.logger.info(f"Testing ETL process with {test_batch_size} random patients using Patient model...")
             
             # Process the test batch through ETL
             success_count = 0
@@ -345,30 +424,37 @@ class TestETLIntegration:
             
             for i, raw_patient in enumerate(test_patients, 1):
                 try:
-                    # Transform the patient data
-                    transformed_patient = etl_service.transformer.transform_patient(raw_patient)
+                    # Use ETL service's process_patient_record method (Patient model approach)
+                    patient = etl_service.process_patient_record(raw_patient)
                     
-                    self.logger.info(f"Processing patient {i}/{test_batch_size}: {transformed_patient.get('lastname', 'Unknown')} {transformed_patient.get('name', 'Unknown')} (ID: {transformed_patient.get('hisnumber', 'Unknown')})")
+                    if not patient:
+                        self.logger.warning(f"Failed to process patient: {raw_patient.get('hisnumber')}")
+                        error_count += 1
+                        continue
+                    
+                    self.logger.info(f"Processing patient {i}/{test_batch_size}: "
+                                   f"{patient.lastname} {patient.name} (ID: {patient.hisnumber})")
+                    self.logger.info(f"  Contact email: {patient.email}, Login email: {patient.login_email}")
+                    
+                    # Convert to dict for database operations
+                    patient_dict = patient.to_patientsdet_dict()
                     
                     # Check if patient already exists
-                    hisnumber = transformed_patient.get('hisnumber')
-                    source = transformed_patient.get('source')
-                    
-                    if pg_repo.patient_exists(hisnumber, source):
-                        self.logger.info(f"  Patient {hisnumber} already exists, using upsert")
-                        if pg_repo.upsert_patient(transformed_patient):
+                    if pg_repo.patient_exists(patient.hisnumber, patient.source):
+                        self.logger.info(f"  Patient {patient.hisnumber} already exists, using upsert")
+                        if pg_repo.upsert_patient(patient_dict):
                             success_count += 1
-                            self.logger.info(f"  ✓ Patient {hisnumber} updated successfully")
+                            self.logger.info(f"  ✓ Patient {patient.hisnumber} updated successfully")
                         else:
                             error_count += 1
-                            self.logger.error(f"  ✗ Failed to update patient {hisnumber}")
+                            self.logger.error(f"  ✗ Failed to update patient {patient.hisnumber}")
                     else:
-                        if pg_repo.insert_patient(transformed_patient):
+                        if pg_repo.insert_patient(patient_dict):
                             success_count += 1
-                            self.logger.info(f"  ✓ Patient {hisnumber} inserted successfully")
+                            self.logger.info(f"  ✓ Patient {patient.hisnumber} inserted successfully")
                         else:
                             error_count += 1
-                            self.logger.error(f"  ✗ Failed to insert patient {hisnumber}")
+                            self.logger.error(f"  ✗ Failed to insert patient {patient.hisnumber}")
                             
                 except Exception as e:
                     error_count += 1
@@ -455,6 +541,9 @@ class TestETLComponents:
         # Check that it created the correct transformer type
         from src.etl.transformers.firebird_transformer import FirebirdTransformer
         assert isinstance(etl_service.transformer, FirebirdTransformer)
+        
+        # Check that process_patient_record method exists
+        assert hasattr(etl_service, 'process_patient_record')
 
     def test_etl_service_initialization_with_yottadb(self):
         """Test ETL service initialization with YottaDB repository."""
@@ -476,6 +565,9 @@ class TestETLComponents:
         # Check that it created the correct transformer type
         from src.etl.transformers.yottadb_transformer import YottaDBTransformer
         assert isinstance(etl_service.transformer, YottaDBTransformer)
+        
+        # Check that process_patient_record method exists
+        assert hasattr(etl_service, 'process_patient_record')
 
     def test_etl_service_initialization_with_unsupported_repository(self):
         """Test ETL service initialization with unsupported repository type."""
@@ -486,6 +578,66 @@ class TestETLComponents:
         # This should raise a ValueError
         with pytest.raises(ValueError, match="Unsupported source repository type"):
             ETLService(mock_source_repo, mock_target_repo)
+
+    def test_patient_model_integration_with_etl_service(self):
+        """Test Patient model integration with ETL service."""
+        # Create mock connectors
+        mock_fb_connector = Mock()
+        mock_pg_connector = Mock()
+        
+        # Create real repositories
+        fb_repo = FirebirdRepository(mock_fb_connector)
+        pg_repo = PostgresRepository(mock_pg_connector)
+        
+        # Create ETL service
+        etl_service = ETLService(fb_repo, pg_repo)
+        
+        # Test processing a Firebird patient
+        firebird_raw = {
+            'hisnumber': '12345',
+            'source': 2,
+            'businessunit': 2,
+            'lastname': 'Тестов',
+            'name': 'Тест',
+            'surname': 'Тестович',
+            'birthdate': '1990-01-01',
+            'documenttypes': 1,
+            'document_number': 1234567890,
+            'email': 'test@example.com',
+            'telephone': '79991234567',
+            'his_password': 'password123',
+            'login_email': 'login@example.com'
+        }
+        
+        patient = etl_service.process_patient_record(firebird_raw)
+        assert patient is not None
+        assert isinstance(patient, Patient)
+        assert patient.hisnumber == '12345'
+        assert patient.source == 2
+        assert patient.login_email == 'login@example.com'
+        
+        # Test YottaDB patient
+        yottadb_raw = {
+            'hisnumber': '67890/A22',
+            'source': 1,
+            'businessunit': 1,
+            'lastname': 'Петров',
+            'name': 'Петр',
+            'surname': 'Петрович',
+            'email': 'contact@example.com',
+            'login_email': 'api_login@example.com'
+        }
+        
+        # Switch to YottaDB repository
+        ydb_repo = YottaDBRepository(mock_fb_connector)  # Reuse mock
+        etl_service = ETLService(ydb_repo, pg_repo)
+        
+        patient = etl_service.process_patient_record(yottadb_raw)
+        assert patient is not None
+        assert isinstance(patient, Patient)
+        assert patient.hisnumber == '67890/A22'
+        assert patient.source == 1
+        assert patient.login_email == 'api_login@example.com'
 
     def test_document_type_mapping(self):
         """Test document type mapping from configuration."""
@@ -527,7 +679,7 @@ def run_integration_tests():
     """Run integration tests manually."""
     logger = setup_logger("test_etl_runner", "test_etl")
     
-    logger.info("Starting ETL integration tests...")
+    logger.info("Starting ETL integration tests with Patient model...")
     
     test_instance = TestETLIntegration()
     test_instance.setup_method()
@@ -535,6 +687,7 @@ def run_integration_tests():
     tests = [
         ("PostgreSQL Connection", test_instance.test_postgres_connection),
         ("PostgreSQL Schema", test_instance.test_postgres_schema),
+        ("Patient Model", test_instance.test_patient_model),
         ("Firebird Connection", test_instance.test_firebird_connection),
         ("YottaDB Connection", test_instance.test_yottadb_connection),
         ("Document Type Handling", test_instance.test_document_type_handling),

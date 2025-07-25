@@ -174,120 +174,14 @@ class YottaDBConnector:
         """
         self.logger.debug("Disconnected from YottaDB API (no-op)")
     
-    def _parse_patient_data(self, lines: List[str]) -> List[Dict[str, Any]]:
-        """
-        Parse patient data from API response lines.
-        Handles multi-line records and data validation.
-        
-        Args:
-            lines: List of lines from API response
-            
-        Returns:
-            List of parsed patient records
-        """
-        patients = []
-        current_record = []
-        skipped_lines = 0
-        
-        for line_num, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Split by delimiter
-            fields = line.split(self.delimiter)
-            
-            # Check if this looks like the start of a new record (has patient ID pattern)
-            # Patient IDs typically start with numbers followed by /
-            is_new_record = False
-            if fields and len(fields) > 0:
-                first_field = fields[0].strip()
-                if '/' in first_field and first_field.split('/')[0].isdigit():
-                    is_new_record = True
-            
-            if is_new_record and current_record:
-                # Process the previous record
-                patient = self._build_patient_record(current_record)
-                if patient:
-                    patients.append(patient)
-                current_record = []
-            
-            # Add current line fields to the record
-            current_record.extend(fields)
-            
-            # If we have enough fields for a complete record, process it
-            if len(current_record) >= 10:
-                patient = self._build_patient_record(current_record)
-                if patient:
-                    patients.append(patient)
-                current_record = []
-        
-        # Process any remaining record
-        if current_record:
-            patient = self._build_patient_record(current_record)
-            if patient:
-                patients.append(patient)
-        
-        if skipped_lines > 0:
-            self.logger.info(f"Skipped {skipped_lines} lines due to insufficient data")
-        
-        return patients
-    
-    def _build_patient_record(self, fields: List[str]) -> Optional[Dict[str, Any]]:
-        """
-        Build a patient record from field list.
-        
-        Args:
-            fields: List of field values
-            
-        Returns:
-            Patient record dict or None if invalid
-        """
-        try:
-            # Ensure we have enough fields
-            if len(fields) < 10:
-                return None
-            
-            # Keep the full hisnumber as provided (e.g., "41449/A22")
-            hisnumber_field = fields[0].strip()
-            
-            # Basic validation - ensure we have some meaningful ID
-            if not hisnumber_field:
-                return None
-            
-            # Build patient record with full hisnumber
-            patient = {
-                "hisnumber": hisnumber_field,  # Keep full format like "41449/A22"
-                "lastname": fields[1].strip() if len(fields) > 1 else "",
-                "name": fields[2].strip() if len(fields) > 2 else "",
-                "surname": fields[3].strip() if len(fields) > 3 else "",
-                "birthdate": fields[4].strip() if len(fields) > 4 else "",
-                "documenttypes": fields[5].strip() if len(fields) > 5 else "",
-                "series": fields[6].strip() if len(fields) > 6 else "",
-                "number": fields[7].strip() if len(fields) > 7 else "",
-                "email": fields[8].strip() if len(fields) > 8 else "",
-                "telephone": fields[9].strip() if len(fields) > 9 else "",
-                "login_email": fields[10].strip() if len(fields) > 10 else "",
-                "source": self.source_id,  # Add source ID
-                "businessunit": 1,  # Default businessunit for qMS
-            }
-            
-            return patient
-            
-        except Exception as e:
-            self.logger.debug(f"Error building patient record from fields {fields[:3]}...: {e}")
-            return None
-    
-    def fetch_all_patients(self) -> List[Dict[str, Any]]:
+    def fetch_all_patients(self) -> List[str]:
         """
         Fetch all patient records from YottaDB API.
         This operation takes 2-3 minutes.
         
         Returns:
-            List of raw patient records
+            List of raw response lines for the repository to parse
         """
-        patients = []
-        
         for attempt in range(self.max_retries):
             try:
                 self.logger.info(f"Fetching all patients from YottaDB API (attempt {attempt + 1}/{self.max_retries})")
@@ -323,15 +217,10 @@ class YottaDBConnector:
                         continue
                     return []
                 
-                # Parse the pipe-delimited data
+                # Return raw lines for the repository to parse
                 lines = content.split('\n')
-                self.logger.info(f"Processing {len(lines)} lines from API response")
-                
-                # Use the new parser that handles multi-line records
-                patients = self._parse_patient_data(lines)
-                
-                self.logger.info(f"Successfully fetched {len(patients)} patients from YottaDB API")
-                return patients
+                self.logger.info(f"Successfully fetched {len(lines)} lines from YottaDB API")
+                return lines
                 
             except requests.exceptions.ConnectTimeout as e:
                 self.logger.error(f"Connection timeout to YottaDB API (attempt {attempt + 1}): {str(e)}")
@@ -370,10 +259,14 @@ class YottaDBConnector:
             Total patient count
         """
         try:
-            patients = self.fetch_all_patients()
-            count = len(patients)
+            lines = self.fetch_all_patients()
+            if not lines:
+                return 0
             
-            self.logger.info(f"Total patient count in YottaDB (qMS): {count}")
+            # Count non-empty lines as a rough estimate
+            count = len([line for line in lines if line.strip()])
+            
+            self.logger.info(f"Total patient lines in YottaDB (qMS): {count}")
             return count
         except Exception as e:
             self.logger.error(f"Error getting patient count from YottaDB: {str(e)}")

@@ -25,13 +25,6 @@ class FirebirdRepository:
     def get_patients(self, batch_size: int = 100, last_id: str = None) -> List[Dict[str, Any]]:
         """
         Fetch raw patient data from Firebird.
-        
-        Args:
-            batch_size: Maximum number of patients to fetch
-            last_id: ID of the last processed patient
-            
-        Returns:
-            List of dictionaries with patient data
         """
         query = """
             SELECT
@@ -53,7 +46,8 @@ class FirebirdRepository:
                     WHEN (c.phone2 IS NOT NULL AND c.phone2 <> '') THEN RemoveNonNumeric(c.phone2)
                     ELSE RemoveNonNumeric(c.phone1)
                 END AS telephone,
-                c.clpassword AS his_password
+                c.clpassword AS his_password,
+                c.cllogin AS login_email
             FROM
                 clients c
             WHERE
@@ -135,6 +129,7 @@ class FirebirdRepository:
                     ELSE RemoveNonNumeric(d.phone1)
                 END AS telephone,
                 d.clpassword AS his_password,
+                d.cllogin AS login_email,
                 d.operation
             FROM
                 Medscan_delta_clients d
@@ -172,7 +167,7 @@ class FirebirdRepository:
                         unprocessed_count = check_rows[0][0]
                         self.logger.warning(f"Database shows {unprocessed_count} unprocessed records exist")
                         if unprocessed_count > 0:
-                            self.logger.error("🔥 TRANSACTION ISOLATION ISSUE: Records exist but query returns 0 rows")
+                            self.logger.error("TRANSACTION ISOLATION ISSUE: Records exist but query returns 0 rows")
                             
                             # Try to force a new transaction
                             self.logger.info("Attempting to force fresh transaction...")

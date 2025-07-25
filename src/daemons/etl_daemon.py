@@ -36,6 +36,9 @@ from src.repositories.yottadb_repository import YottaDBRepository
 # Import ETL components
 from src.etl.etl_service import ETLService
 
+# Import Patient model
+from src.models.patient import Patient
+
 # Global flag for graceful shutdown
 SHOULD_RUN = True
 
@@ -209,7 +212,7 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
 
 def perform_initial_load(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
     """
-    Perform initial data load from source to PostgreSQL.
+    Perform initial data load from source to PostgreSQL using Patient model.
     """
     source_name = etl_service.source_repo.__class__.__name__
     source_id = etl_service.source_repo.get_source_id()
@@ -314,25 +317,33 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
                 logger.info(f"Batch {batch_counter}: Processing {len(patients)} patients "
                            f"(range: {min_hisnumber} - {max_hisnumber})")
             
-            # Process the batch of patients
+            # Process the batch of patients using Patient model
             batch_success_count = 0
             for raw_patient in patients:
                 try:
-                    # Transform the patient data first
-                    patient = etl_service.transformer.transform_patient(raw_patient)
+                    # Use ETL service to process patient with Patient model
+                    patient = etl_service.process_patient_record(raw_patient)
+                    if not patient:
+                        logger.warning(f"Failed to process patient record: {raw_patient.get('hisnumber')}")
+                        status["error_count"] += 1
+                        continue
+                    
+                    # Convert to dict for database operations
+                    patient_dict = patient.to_patientsdet_dict()
                     
                     # Check if the patient already exists to avoid duplicate key violations
-                    hisnumber = patient.get('hisnumber')
-                    source = patient.get('source')
-                    
-                    if etl_service.target_repo.patient_exists(hisnumber, source):
-                        logger.debug(f"Patient {hisnumber} already exists, skipping")
+                    if etl_service.target_repo.patient_exists(patient.hisnumber, patient.source):
+                        logger.debug(f"Patient {patient.hisnumber} already exists, skipping")
                         batch_success_count += 1  # Count as success since it's already there
                         continue
                         
                     # Insert the patient
-                    if etl_service.target_repo.insert_patient(patient):
+                    if etl_service.target_repo.insert_patient(patient_dict):
                         batch_success_count += 1
+                        logger.debug(f"Successfully inserted patient {patient.hisnumber}")
+                    else:
+                        logger.error(f"Failed to insert patient {patient.hisnumber}")
+                        
                 except Exception as e:
                     logger.error(f"Error processing patient {raw_patient.get('hisnumber')}: {e}")
                     status["error_count"] += 1
@@ -369,8 +380,6 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
                            f"total processed: {total_processed}, "
                            f"overall progress: {current_dest_count}/{current_source_count} ({progress_percent:.1f}%)")
                 
-                # Don't break here - just report progress
-                
             else:
                 logger.debug(f"Batch {batch_counter} completed in {batch_duration:.2f}s, "
                            f"batch success: {batch_success_count}/{len(patients)}, "
@@ -392,7 +401,6 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
                     break
                 else:
                     logger.info(f"Near end of data but completion rate {progress_percent:.1f}% is below 95% threshold. Continuing...")
-                    # Continue processing even if we're near the end but haven't reached 95%
         
         # Final completion check
         is_complete, final_source_count, final_dest_count = check_initial_load_complete(etl_service)
@@ -430,7 +438,7 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
 
 def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
     """
-    Perform YottaDB full synchronization (upsert all records).
+    Perform YottaDB full synchronization (upsert all records) using Patient model.
     Since YottaDB provides current state, we upsert everything.
     """
     source_name = etl_service.source_repo.__class__.__name__
@@ -488,24 +496,28 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
             
             consecutive_empty_batches = 0
             
-            # Process the batch of patients with UPSERT logic
+            # Process the batch of patients with UPSERT logic using Patient model
             batch_success_count = 0
             batch_new_count = 0
             batch_updated_count = 0
             
             for raw_patient in patients:
                 try:
-                    # Transform the patient data
-                    patient = etl_service.transformer.transform_patient(raw_patient)
+                    # Use ETL service to process patient with Patient model
+                    patient = etl_service.process_patient_record(raw_patient)
+                    if not patient:
+                        logger.warning(f"Failed to process YottaDB patient record: {raw_patient.get('hisnumber')}")
+                        status["error_count"] += 1
+                        continue
                     
-                    hisnumber = patient.get('hisnumber')
-                    source = patient.get('source')
+                    # Convert to dict for database operations
+                    patient_dict = patient.to_patientsdet_dict()
                     
                     # Check if patient exists to track new vs updated
-                    patient_exists = etl_service.target_repo.patient_exists(hisnumber, source)
+                    patient_exists = etl_service.target_repo.patient_exists(patient.hisnumber, patient.source)
                     
                     # Always upsert (insert or update)
-                    if etl_service.target_repo.upsert_patient(patient):
+                    if etl_service.target_repo.upsert_patient(patient_dict):
                         batch_success_count += 1
                         if patient_exists:
                             batch_updated_count += 1
@@ -513,7 +525,7 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
                             batch_new_count += 1
                     
                 except Exception as e:
-                    logger.error(f"Error processing patient {raw_patient.get('hisnumber')}: {e}")
+                    logger.error(f"Error processing YottaDB patient {raw_patient.get('hisnumber')}: {e}")
                     status["error_count"] += 1
             
             # Update tracking
@@ -572,7 +584,7 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
 
 
 def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
-    """Perform delta synchronization from source to PostgreSQL."""
+    """Perform delta synchronization from source to PostgreSQL using Patient model."""
     source_name = etl_service.source_repo.__class__.__name__
     
     logger.info(f"=== Starting delta synchronization from {source_name} ===")
@@ -613,7 +625,7 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
         
         logger.info(f"Processing {len(delta_records)} delta records...")
         
-        # Group records by operation type
+        # Group records by operation type using Patient model
         inserts = []
         updates = []
         deletes = []
@@ -625,23 +637,30 @@ def perform_delta_sync(etl_service: ETLService, max_records: int) -> Dict[str, A
                 
                 logger.debug(f"Processing delta record {i}: hisnumber={hisnumber}, operation={operation}")
                 
-                # Remove the operation field (no delta_id in our schema)
+                # Remove the operation field 
                 record_copy = raw_record.copy()
                 record_copy.pop('operation', None)
                 
-                # Transform the record
-                transformed_record = etl_service.transformer.transform_patient(record_copy)
+                # Use ETL service to process with Patient model
+                patient = etl_service.process_patient_record(record_copy)
+                if not patient:
+                    logger.warning(f"Failed to process delta record: {hisnumber}")
+                    status["error_count"] += 1
+                    continue
+                
+                # Convert to dict for database operations
+                patient_dict = patient.to_patientsdet_dict()
                 
                 if operation == 'INSERT':
-                    inserts.append(transformed_record)
+                    inserts.append(patient_dict)
                     status["operations"]["INSERT"] += 1
                     logger.debug(f"Queued INSERT for {hisnumber}")
                 elif operation == 'UPDATE':
-                    updates.append(transformed_record)
+                    updates.append(patient_dict)
                     status["operations"]["UPDATE"] += 1
                     logger.debug(f"Queued UPDATE for {hisnumber}")
                 elif operation == 'DELETE':
-                    deletes.append(transformed_record)
+                    deletes.append(patient_dict)
                     status["operations"]["DELETE"] += 1
                     logger.debug(f"Queued DELETE for {hisnumber}")
                 else:

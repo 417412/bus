@@ -35,11 +35,12 @@ BEGIN
                 RAISE NOTICE 'Updating qMS fields for existing patient';
                 UPDATE patients
                 SET 
-                    -- Update HIS-specific fields
+                    -- Update HIS-specific fields including login
                     hisnumber_qms = NEW.hisnumber,
                     email_qms = NEW.email,
                     telephone_qms = NEW.telephone,
                     password_qms = NEW.his_password,
+                    login_qms = NEW.login_email,
                     
                     -- Update demographic fields if they're empty
                     lastname = COALESCE(lastname, NEW.lastname),
@@ -54,11 +55,12 @@ BEGIN
                 RAISE NOTICE 'Updating Infoclinica fields for existing patient';
                 UPDATE patients
                 SET 
-                    -- Update HIS-specific fields
+                    -- Update HIS-specific fields including login
                     hisnumber_infoclinica = NEW.hisnumber,
                     email_infoclinica = NEW.email,
                     telephone_infoclinica = NEW.telephone,
                     password_infoclinica = NEW.his_password,
+                    login_infoclinica = NEW.login_email,
                     
                     -- Update demographic fields if they're empty
                     lastname = COALESCE(lastname, NEW.lastname),
@@ -85,21 +87,23 @@ BEGIN
                 documenttypes, document_number,
                 lastname, name, surname, birthdate,
                 primary_source,
-                hisnumber_qms, email_qms, telephone_qms, password_qms,
-                hisnumber_infoclinica, email_infoclinica, telephone_infoclinica, password_infoclinica
+                hisnumber_qms, email_qms, telephone_qms, password_qms, login_qms,
+                hisnumber_infoclinica, email_infoclinica, telephone_infoclinica, password_infoclinica, login_infoclinica
             ) 
             VALUES (
                 NEW.documenttypes, NEW.document_number,
                 NEW.lastname, NEW.name, NEW.surname, NEW.birthdate,
                 NEW.source,
-                CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,       -- qMS
-                CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,           -- qMS
-                CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,       -- qMS
-                CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,    -- qMS
-                CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,       -- Инфоклиника
-                CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,           -- Инфоклиника
-                CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,       -- Инфоклиника
-                CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END     -- Инфоклиника
+                CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,           -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,               -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,           -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,        -- qMS
+                CASE WHEN NEW.source = 1 THEN NEW.login_email ELSE NULL END,         -- qMS login
+                CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,           -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,               -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,           -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END,        -- Инфоклиника
+                CASE WHEN NEW.source = 2 THEN NEW.login_email ELSE NULL END          -- Инфоклиника login
             )
             RETURNING uuid INTO v_patient_uuid;
             
@@ -120,21 +124,23 @@ BEGIN
             documenttypes, document_number,
             lastname, name, surname, birthdate,
             primary_source,
-            hisnumber_qms, email_qms, telephone_qms, password_qms,
-            hisnumber_infoclinica, email_infoclinica, telephone_infoclinica, password_infoclinica
+            hisnumber_qms, email_qms, telephone_qms, password_qms, login_qms,
+            hisnumber_infoclinica, email_infoclinica, telephone_infoclinica, password_infoclinica, login_infoclinica
         ) 
         VALUES (
             NEW.documenttypes, NEW.document_number,
             NEW.lastname, NEW.name, NEW.surname, NEW.birthdate,
             NEW.source,
-            CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,       -- qMS
-            CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,           -- qMS
-            CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,       -- qMS
-            CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,    -- qMS
-            CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,       -- Инфоклиника
-            CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,           -- Инфоклиника
-            CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,       -- Инфоклиника
-            CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END     -- Инфоклиника
+            CASE WHEN NEW.source = 1 THEN NEW.hisnumber ELSE NULL END,           -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.email ELSE NULL END,               -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.telephone ELSE NULL END,           -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.his_password ELSE NULL END,        -- qMS
+            CASE WHEN NEW.source = 1 THEN NEW.login_email ELSE NULL END,         -- qMS login
+            CASE WHEN NEW.source = 2 THEN NEW.hisnumber ELSE NULL END,           -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.email ELSE NULL END,               -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.telephone ELSE NULL END,           -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.his_password ELSE NULL END,        -- Инфоклиника
+            CASE WHEN NEW.source = 2 THEN NEW.login_email ELSE NULL END          -- Инфоклиника login
         )
         RETURNING uuid INTO v_patient_uuid;
         
@@ -200,7 +206,8 @@ BEGIN
                     hisnumber_qms = NEW.hisnumber,
                     email_qms = NEW.email,
                     telephone_qms = NEW.telephone,
-                    password_qms = NEW.his_password
+                    password_qms = NEW.his_password,
+                    login_qms = NEW.login_email
                 WHERE uuid = v_other_patient_uuid;
                 
                 -- Transfer any missing data from the old record to the merged one
@@ -209,7 +216,8 @@ BEGIN
                     hisnumber_infoclinica = COALESCE(p1.hisnumber_infoclinica, p2.hisnumber_infoclinica),
                     email_infoclinica = COALESCE(p1.email_infoclinica, p2.email_infoclinica),
                     telephone_infoclinica = COALESCE(p1.telephone_infoclinica, p2.telephone_infoclinica),
-                    password_infoclinica = COALESCE(p1.password_infoclinica, p2.password_infoclinica)
+                    password_infoclinica = COALESCE(p1.password_infoclinica, p2.password_infoclinica),
+                    login_infoclinica = COALESCE(p1.login_infoclinica, p2.login_infoclinica)
                 FROM patients p2
                 WHERE p1.uuid = v_other_patient_uuid AND p2.uuid = OLD.uuid;
                 
@@ -219,7 +227,8 @@ BEGIN
                     hisnumber_infoclinica = NEW.hisnumber,
                     email_infoclinica = NEW.email,
                     telephone_infoclinica = NEW.telephone,
-                    password_infoclinica = NEW.his_password
+                    password_infoclinica = NEW.his_password,
+                    login_infoclinica = NEW.login_email
                 WHERE uuid = v_other_patient_uuid;
                 
                 -- Transfer any missing data from the old record to the merged one
@@ -228,7 +237,8 @@ BEGIN
                     hisnumber_qms = COALESCE(p1.hisnumber_qms, p2.hisnumber_qms),
                     email_qms = COALESCE(p1.email_qms, p2.email_qms),
                     telephone_qms = COALESCE(p1.telephone_qms, p2.telephone_qms),
-                    password_qms = COALESCE(p1.password_qms, p2.password_qms)
+                    password_qms = COALESCE(p1.password_qms, p2.password_qms),
+                    login_qms = COALESCE(p1.login_qms, p2.login_qms)
                 FROM patients p2
                 WHERE p1.uuid = v_other_patient_uuid AND p2.uuid = OLD.uuid;
             END IF;
@@ -291,11 +301,12 @@ BEGIN
                 documenttypes = NEW.documenttypes,
                 document_number = NEW.document_number,
                 
-                -- Update HIS-specific fields
+                -- Update HIS-specific fields including login
                 hisnumber_qms = NEW.hisnumber,
                 email_qms = NEW.email,
                 telephone_qms = NEW.telephone,
-                password_qms = NEW.his_password
+                password_qms = NEW.his_password,
+                login_qms = NEW.login_email
             WHERE uuid = NEW.uuid;
         ELSIF NEW.source = 2 THEN  -- Инфоклиника
             UPDATE patients
@@ -308,11 +319,12 @@ BEGIN
                 documenttypes = NEW.documenttypes,
                 document_number = NEW.document_number,
                 
-                -- Update HIS-specific fields
+                -- Update HIS-specific fields including login
                 hisnumber_infoclinica = NEW.hisnumber,
                 email_infoclinica = NEW.email,
                 telephone_infoclinica = NEW.telephone,
-                password_infoclinica = NEW.his_password
+                password_infoclinica = NEW.his_password,
+                login_infoclinica = NEW.login_email
             WHERE uuid = NEW.uuid;
         END IF;
         

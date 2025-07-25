@@ -47,7 +47,7 @@ INSERT INTO documenttypes (id, name) VALUES
 (16, 'Военный билет офицера запаса'),
 (17, 'Иные документы');
 
--- Consolidated patients table with additional fields
+-- Consolidated patients table with additional fields including login emails
 CREATE TABLE patients (
     id SERIAL PRIMARY KEY,
     uuid UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -65,13 +65,15 @@ CREATE TABLE patients (
     hisnumber_infoclinica VARCHAR(255),
     
     -- Contact info and credentials for each HIS
-    email_qms VARCHAR(255),
+    email_qms VARCHAR(255),              -- Contact email for qMS
     telephone_qms VARCHAR(50),
     password_qms VARCHAR(100),
+    login_qms VARCHAR(255),              -- Login email for qMS API
     
-    email_infoclinica VARCHAR(255),
+    email_infoclinica VARCHAR(255),      -- Contact email for Infoclinica
     telephone_infoclinica VARCHAR(50),
     password_infoclinica VARCHAR(100),
+    login_infoclinica VARCHAR(255),      -- Login email for Infoclinica
     
     -- Source of canonical data
     primary_source SMALLINT REFERENCES hislist(id),
@@ -91,9 +93,10 @@ CREATE TABLE patientsdet (
     birthdate DATE,
     documenttypes SMALLINT REFERENCES documenttypes(id),
     document_number BIGINT,
-    email VARCHAR(255),
+    email VARCHAR(255),          -- Contact email
     telephone VARCHAR(50),
     his_password VARCHAR(100),
+    login_email VARCHAR(255),    -- Login email for HIS API access
     uuid UUID REFERENCES patients(uuid),
     CONSTRAINT unique_hisnumber_source UNIQUE (hisnumber, source)
 );
