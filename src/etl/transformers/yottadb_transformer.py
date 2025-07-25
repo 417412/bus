@@ -161,12 +161,6 @@ class YottaDBTransformer:
     def transform_patient(self, raw_patient: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform a raw patient record into standardized format.
-        
-        Args:
-            raw_patient: Raw patient data from YottaDB (qMS)
-            
-        Returns:
-            Standardized patient record
         """
         try:
             # Extract and transform fields
@@ -180,37 +174,35 @@ class YottaDBTransformer:
             # Clean phone number
             telephone = self.clean_phone_number(raw_patient.get('telephone'))
             
-            # Use login_email as primary email, fallback to email
-            email = raw_patient.get('login_email') or raw_patient.get('email')
-            
-            # Keep the full hisnumber as provided by the API (don't extract just the numeric part)
+            # Keep the full hisnumber as provided by the API
             hisnumber = raw_patient.get('hisnumber', '')
             
             # Build standardized patient record
             return {
-                "hisnumber": hisnumber,  # Keep full hisnumber like "41449/A22" as string
+                "hisnumber": hisnumber,
                 "source": raw_patient.get('source', 1),  # qMS = 1
-                "businessunit": raw_patient.get('businessunit', 1),  # Default businessunit for qMS
+                "businessunit": raw_patient.get('businessunit', 1),
                 "lastname": raw_patient.get('lastname'),
                 "name": raw_patient.get('name'),
                 "surname": raw_patient.get('surname'),
                 "birthdate": birthdate,
                 "documenttypes": doc_type,
                 "document_number": document_number,
-                "email": email,
+                "email": raw_patient.get('email'),          # Contact email
                 "telephone": telephone,
-                # No password for qMS patients via HTTP API
-                "his_password": None
+                "his_password": None,                       # No password for qMS patients
+                "login_email": raw_patient.get('login_email')  # LOGIN EMAIL - ADD THIS
             }
         except Exception as e:
             self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
-            # Return a minimal record with the hisnumber and source to maintain data flow
+            # Return a minimal record
             return {
-                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                "hisnumber": str(raw_patient.get('hisnumber', '')),
                 "source": raw_patient.get('source', 1),
                 "businessunit": raw_patient.get('businessunit', 1),
-                "documenttypes": 17,  # Default to "Иные документы" for error cases
+                "documenttypes": 17,  # Default to "Иные документы"
                 "lastname": raw_patient.get('lastname'),
                 "name": raw_patient.get('name'),
-                "surname": raw_patient.get('surname')
+                "surname": raw_patient.get('surname'),
+                "login_email": raw_patient.get('login_email')  # ADD THIS TOO
             }

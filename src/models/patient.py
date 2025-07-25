@@ -101,7 +101,7 @@ class Patient:
             email=raw_data.get('email'),
             telephone=raw_data.get('telephone'),
             his_password=raw_data.get('his_password'),
-            login_email=raw_data.get('login_email')  # New field from cllogin
+            login_email=raw_data.get('login_email')  # This field should be in Firebird queries now
         )
     
     @classmethod

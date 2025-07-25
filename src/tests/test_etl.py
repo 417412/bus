@@ -333,11 +333,11 @@ class TestETLIntegration:
             if not patients:
                 pytest.skip("No patients available in Firebird for testing")
             
-            # Process each patient using the new Patient model approach
+            # Process each patient using the NEW Patient model approach
             success_count = 0
             for raw_patient in patients:
                 try:
-                    # Use ETL service's process_patient_record method (Patient model approach)
+                    # CHANGE: Use ETL service's process_patient_record method instead of direct transformer
                     patient = etl_service.process_patient_record(raw_patient)
                     
                     if not patient:
@@ -346,6 +346,12 @@ class TestETLIntegration:
                     
                     # Convert to dict for database operations
                     patient_dict = patient.to_patientsdet_dict()
+                    
+                    # Log document type handling
+                    if raw_patient.get('documenttypes') and patient.documenttypes:
+                        if raw_patient.get('documenttypes') != patient.documenttypes:
+                            self.logger.info(f"Patient {patient.hisnumber}: mapped document type "
+                                           f"{raw_patient.get('documenttypes')} -> {patient.documenttypes}")
                     
                     # Check if the patient already exists
                     if pg_repo.patient_exists(patient.hisnumber, patient.source):
@@ -364,6 +370,8 @@ class TestETLIntegration:
                     
                 except Exception as e:
                     self.logger.error(f"Error processing patient: {e}")
+                    # Log the raw patient data for debugging
+                    self.logger.error(f"Raw patient data: {raw_patient}")
             
             self.logger.info(f"Firebird ETL processed {success_count}/{len(patients)} patients successfully")
             
@@ -377,11 +385,7 @@ class TestETLIntegration:
 
     @pytest.mark.slow
     def test_yottadb_etl_process(self):
-        """Test YottaDB ETL process with full API fetch and sample processing using Patient model.
-        
-        This test is marked as 'slow' because it takes 2-3 minutes to complete.
-        Run with: pytest -m slow test_etl.py::TestETLIntegration::test_yottadb_etl_process
-        """
+        """Test YottaDB ETL process with full API fetch and sample processing using Patient model."""
         self.logger.info("Testing YottaDB ETL process with Patient model...")
         self.logger.info("WARNING: This will fetch all data from YottaDB API (takes 2-3 minutes)")
         
@@ -424,7 +428,7 @@ class TestETLIntegration:
             
             for i, raw_patient in enumerate(test_patients, 1):
                 try:
-                    # Use ETL service's process_patient_record method (Patient model approach)
+                    # CHANGE: Use ETL service's process_patient_record method instead of direct transformer
                     patient = etl_service.process_patient_record(raw_patient)
                     
                     if not patient:
@@ -434,6 +438,11 @@ class TestETLIntegration:
                     
                     self.logger.info(f"Processing patient {i}/{test_batch_size}: "
                                    f"{patient.lastname} {patient.name} (ID: {patient.hisnumber})")
+                    
+                    # Log document type mapping
+                    if raw_patient.get('documenttypes') and patient.documenttypes:
+                        self.logger.info(f"  Document type: {raw_patient.get('documenttypes')} -> {patient.documenttypes}")
+                    
                     self.logger.info(f"  Contact email: {patient.email}, Login email: {patient.login_email}")
                     
                     # Convert to dict for database operations
@@ -459,6 +468,8 @@ class TestETLIntegration:
                 except Exception as e:
                     error_count += 1
                     self.logger.error(f"  ✗ Error processing patient {i}: {str(e)}")
+                    # Log the raw patient data for debugging
+                    self.logger.error(f"Raw patient data: {raw_patient}")
             
             self.logger.info(f"YottaDB ETL test completed: {success_count} successful, {error_count} errors")
             
