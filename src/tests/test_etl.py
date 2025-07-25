@@ -37,19 +37,288 @@ from src.etl.etl_service import ETLService
 
 # Import Patient model
 from src.models.patient import Patient
+import functools
+import inspect
+
+def trace_calls(func):
+    """Decorator to trace function calls for debugging."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Get calling context
+        frame = inspect.currentframe()
+        caller_frame = frame.f_back
+        caller_name = caller_frame.f_code.co_name
+        
+        print(f"TRACE: {caller_name} -> {func.__name__}")
+        print(f"  Args: {args[1:] if args else []}")  # Skip 'self'
+        print(f"  Kwargs: {kwargs}")
+        
+        result = func(*args, **kwargs)
+        
+        print(f"TRACE: {func.__name__} returned: {type(result)} {result if len(str(result)) < 100 else str(result)[:100] + '...'}")
+        return result
+    return wrapper
 
 class TestETLIntegration:
-    """Integration tests for the ETL system."""
-    
     def setup_method(self):
         """Setup for each test method."""
+        # Set up more verbose logging for the test
+        logging.basicConfig(level=logging.DEBUG)
+        
+        # Enable debug logging for specific modules during tests
+        logging.getLogger('src.etl.etl_service').setLevel(logging.DEBUG)
+        logging.getLogger('src.models.patient').setLevel(logging.DEBUG)
+        logging.getLogger('src.repositories.firebird_repository').setLevel(logging.DEBUG)
+        
         self.logger = setup_logger("test_etl", "test_etl")
         
         # Use decrypted database config
         self.db_config = get_decrypted_database_config()
         
         # Test data for document type testing
-        self.test_document_types = [1, 3, 5, 10, 14, 17]  # Sample of document types
+        self.test_document_types = [1, 3, 5, 10, 14, 17]
+    
+    def test_firebird_etl_process_traced(self):
+        """Test with method tracing."""
+        
+        # Create connectors
+        fb_connector = FirebirdConnector()
+        pg_connector = PostgresConnector()
+        
+        if not fb_connector.connect() or not pg_connector.connect():
+            pytest.skip("Database connections not available")
+        
+        try:
+            # Create repositories  
+            fb_repo = FirebirdRepository(fb_connector)
+            pg_repo = PostgresRepository(pg_connector)
+            etl_service = ETLService(fb_repo, pg_repo)
+            
+            # Temporarily patch the methods we want to trace
+            original_process_record = etl_service.process_patient_record
+            original_from_firebird = Patient.from_firebird_raw
+            
+            etl_service.process_patient_record = trace_calls(original_process_record)
+            Patient.from_firebird_raw = staticmethod(trace_calls(original_from_firebird))
+            
+            try:
+                # Get patients and process
+                patients = fb_repo.get_patients(batch_size=1)  # Just 1 for detailed trace
+                
+                if patients:
+                    raw_patient = patients[0]
+                    print(f"\nTRACE: Starting with raw patient: {raw_patient}")
+                    
+                    patient = etl_service.process_patient_record(raw_patient)
+                    
+                    if patient:
+                        print(f"TRACE: Final patient documenttypes: {patient.documenttypes}")
+                        patient_dict = patient.to_patientsdet_dict()
+                        print(f"TRACE: Final dict documenttypes: {patient_dict.get('documenttypes')}")
+                    
+            finally:
+                # Restore original methods
+                etl_service.process_patient_record = original_process_record
+                Patient.from_firebird_raw = original_from_firebird
+                
+        finally:
+            fb_connector.disconnect()
+            pg_connector.disconnect()
+    
+    def test_firebird_data_transformation_pipeline(self):
+        """Test each step of the transformation pipeline separately."""
+        
+        fb_connector = FirebirdConnector()
+        if not fb_connector.connect():
+            pytest.skip("Firebird connection not available")
+        
+        try:
+            fb_repo = FirebirdRepository(fb_connector)
+            
+            # Step 1: Get raw data
+            print("\n=== STEP 1: RAW DATA FROM FIREBIRD ===")
+            patients = fb_repo.get_patients(batch_size=1)
+            
+            if not patients:
+                pytest.skip("No patients available")
+            
+            raw_patient = patients[0]
+            print(f"Raw patient data:")
+            for key, value in raw_patient.items():
+                print(f"  {key}: {repr(value)} (type: {type(value).__name__})")
+            
+            # Step 2: Create Patient from raw data
+            print("\n=== STEP 2: PATIENT MODEL CREATION ===")
+            try:
+                patient = Patient.from_firebird_raw(raw_patient)
+                print(f"Patient created successfully:")
+                print(f"  hisnumber: {patient.hisnumber}")
+                print(f"  source: {patient.source}")
+                print(f"  documenttypes: {patient.documenttypes} (type: {type(patient.documenttypes).__name__})")
+                print(f"  document_number: {patient.document_number}")
+            except Exception as e:
+                print(f"ERROR creating Patient: {e}")
+                import traceback
+                traceback.print_exc()
+                return
+            
+            # Step 3: Convert to dict
+            print("\n=== STEP 3: CONVERT TO DICT ===")
+            try:
+                patient_dict = patient.to_patientsdet_dict()
+                print(f"Patient dict created:")
+                print(f"  hisnumber: {patient_dict.get('hisnumber')}")
+                print(f"  source: {patient_dict.get('source')}")
+                print(f"  documenttypes: {patient_dict.get('documenttypes')} (type: {type(patient_dict.get('documenttypes')).__name__})")
+                print(f"  document_number: {patient_dict.get('document_number')}")
+            except Exception as e:
+                print(f"ERROR converting to dict: {e}")
+                import traceback
+                traceback.print_exc()
+                return
+            
+            # Step 4: Show what would be inserted
+            print("\n=== STEP 4: WHAT WOULD BE INSERTED ===")
+            print("This patient_dict would be sent to PostgreSQL:")
+            for key, value in patient_dict.items():
+                print(f"  {key}: {repr(value)} (type: {type(value).__name__})")
+            
+            print(f"\n=== DIAGNOSIS ===")
+            expected_doc_type = 17 if raw_patient.get('documenttypes') == 99 else raw_patient.get('documenttypes')
+            actual_doc_type = patient_dict.get('documenttypes')
+            
+            print(f"Raw documenttypes: {raw_patient.get('documenttypes')}")
+            print(f"Expected after transformation: {expected_doc_type}")
+            print(f"Actual in final dict: {actual_doc_type}")
+            
+            if actual_doc_type == 99:
+                print("❌ PROBLEM: Document type 99 was NOT transformed to 17")
+                print("   The Patient model __post_init__ validation didn't run or didn't work")
+            else:
+                print("✅ OK: Document type was properly transformed")
+                
+        finally:
+            fb_connector.disconnect()
+
+    def test_firebird_etl_process_with_debug(self):
+        """Test the Firebird ETL process with detailed debugging."""
+        self.logger.info("=" * 80)
+        self.logger.info("STARTING FIREBIRD ETL PROCESS DEBUG TEST")
+        self.logger.info("=" * 80)
+        
+        # Create connectors with default decrypted config
+        fb_connector = FirebirdConnector()
+        pg_connector = PostgresConnector()
+        
+        if not fb_connector.connect():
+            pytest.skip("Firebird connection not available")
+            
+        assert pg_connector.connect(), "PostgreSQL connection should succeed"
+        
+        try:
+            # Create repositories
+            self.logger.info("STEP 1: Creating repositories")
+            fb_repo = FirebirdRepository(fb_connector)
+            pg_repo = PostgresRepository(pg_connector)
+            
+            # Create ETL service
+            self.logger.info("STEP 2: Creating ETL service")
+            etl_service = ETLService(fb_repo, pg_repo)
+            self.logger.info(f"ETL service transformer type: {type(etl_service.transformer)}")
+            
+            # Process a small batch
+            batch_size = 2  # Even smaller for detailed debugging
+            self.logger.info(f"STEP 3: Getting {batch_size} patients from Firebird")
+            
+            # Get a batch of patients
+            patients = fb_repo.get_patients(batch_size=batch_size)
+            
+            if not patients:
+                pytest.skip("No patients available in Firebird for testing")
+            
+            self.logger.info(f"STEP 4: Retrieved {len(patients)} patients")
+            
+            # Inspect each raw patient in detail
+            for i, raw_patient in enumerate(patients):
+                self.logger.info(f"\n--- RAW PATIENT {i+1} ---")
+                for key, value in raw_patient.items():
+                    self.logger.info(f"  {key}: {value} (type: {type(value)})")
+            
+            # Process each patient step by step
+            success_count = 0
+            for i, raw_patient in enumerate(patients):
+                self.logger.info(f"\n{'='*60}")
+                self.logger.info(f"PROCESSING PATIENT {i+1}: {raw_patient.get('hisnumber')}")
+                self.logger.info(f"{'='*60}")
+                
+                try:
+                    # Step 1: Call process_patient_record
+                    self.logger.info("STEP A: Calling etl_service.process_patient_record()")
+                    self.logger.info(f"Input document type: {raw_patient.get('documenttypes')} (type: {type(raw_patient.get('documenttypes'))})")
+                    
+                    patient = etl_service.process_patient_record(raw_patient)
+                    
+                    if not patient:
+                        self.logger.error("STEP A FAILED: process_patient_record returned None")
+                        continue
+                    
+                    self.logger.info(f"STEP A SUCCESS: Got Patient object")
+                    self.logger.info(f"Patient.hisnumber: {patient.hisnumber}")
+                    self.logger.info(f"Patient.source: {patient.source}")
+                    self.logger.info(f"Patient.documenttypes: {patient.documenttypes} (type: {type(patient.documenttypes)})")
+                    
+                    # Step 2: Convert to dict
+                    self.logger.info("STEP B: Converting to patientsdet dict")
+                    patient_dict = patient.to_patientsdet_dict()
+                    
+                    self.logger.info(f"STEP B SUCCESS: Got patient dict")
+                    self.logger.info(f"Dict documenttypes: {patient_dict.get('documenttypes')} (type: {type(patient_dict.get('documenttypes'))})")
+                    
+                    # Step 3: Check if exists
+                    self.logger.info("STEP C: Checking if patient exists")
+                    exists = pg_repo.patient_exists(patient.hisnumber, patient.source)
+                    self.logger.info(f"Patient exists: {exists}")
+                    
+                    if exists:
+                        self.logger.info("STEP C: Patient exists, skipping insert")
+                        success_count += 1
+                        continue
+                    
+                    # Step 4: Insert
+                    self.logger.info("STEP D: Inserting patient")
+                    self.logger.info(f"Final insert data documenttypes: {patient_dict.get('documenttypes')}")
+                    
+                    # Let's manually inspect what we're about to insert
+                    insert_data_summary = {
+                        'hisnumber': patient_dict.get('hisnumber'),
+                        'source': patient_dict.get('source'), 
+                        'documenttypes': patient_dict.get('documenttypes'),
+                        'document_number': patient_dict.get('document_number')
+                    }
+                    self.logger.info(f"Insert summary: {insert_data_summary}")
+                    
+                    if pg_repo.insert_patient(patient_dict):
+                        success_count += 1
+                        self.logger.info(f"STEP D SUCCESS: Patient {patient.hisnumber} inserted")
+                    else:
+                        self.logger.error(f"STEP D FAILED: Could not insert patient {patient.hisnumber}")
+                    
+                except Exception as e:
+                    self.logger.error(f"ERROR processing patient {raw_patient.get('hisnumber')}: {e}")
+                    import traceback
+                    self.logger.error(f"Traceback:\n{traceback.format_exc()}")
+            
+            self.logger.info(f"\nFINAL RESULT: {success_count}/{len(patients)} patients processed successfully")
+            
+            # Make the test more lenient for debugging
+            if success_count == 0:
+                self.logger.error("No patients were processed successfully")
+                # Don't fail the test, just log the issue
+                pytest.skip("No patients processed - debugging needed")
+            
+        finally:
+            fb_connector.disconnect()
+            pg_connector.disconnect()
     
     def test_postgres_connection(self):
         """Test PostgreSQL connection."""

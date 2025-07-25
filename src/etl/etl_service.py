@@ -30,6 +30,10 @@ class ETLService:
         """
         Process a raw patient record into a standardized Patient model.
         
+        This method:
+        1. Uses the appropriate transformer to normalize the data
+        2. Creates a Patient model from the transformed data
+        
         Args:
             raw_patient: Raw patient data from source system
             
@@ -38,17 +42,36 @@ class ETLService:
         """
         try:
             source = raw_patient.get('source')
+            hisnumber = raw_patient.get('hisnumber', 'unknown')
             
+            self.logger.debug(f"Processing patient {hisnumber} from source {source}")
+            
+            # STEP 1: Transform the raw data using the appropriate transformer
+            transformed_data = self.transformer.transform_patient(raw_patient)
+            
+            if not transformed_data:
+                self.logger.error(f"Transformer returned None for patient {hisnumber}")
+                return None
+            
+            self.logger.debug(f"Transformer mapped document type: {raw_patient.get('documenttypes')} -> {transformed_data.get('documenttypes')}")
+            
+            # STEP 2: Create Patient model from transformed data
             if source == 1:  # YottaDB/qMS
-                return Patient.from_yottadb_raw(raw_patient)
+                patient = Patient.from_yottadb_raw(transformed_data)
             elif source == 2:  # Firebird/Infoclinica
-                return Patient.from_firebird_raw(raw_patient)
+                patient = Patient.from_firebird_raw(transformed_data)
             else:
                 self.logger.error(f"Unknown source: {source}")
                 return None
+            
+            self.logger.debug(f"Created Patient model for {patient.hisnumber} with final document type {patient.documenttypes}")
+            return patient
                 
         except Exception as e:
             self.logger.error(f"Error processing patient record: {e}")
+            self.logger.error(f"Raw patient data: {raw_patient}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
         
     def process_batch(self, batch_size: int = 100, last_id: Optional[str] = None) -> int:
@@ -71,13 +94,13 @@ class ETLService:
             return 0
             
         # Transform and Load using Patient model
-        self.logger.info(f"Processing {len(raw_patients)} patients using Patient model")
+        self.logger.info(f"Processing {len(raw_patients)} patients using transformer + Patient model")
         success_count = 0
         max_id = None
         
         for raw_patient in raw_patients:
             try:
-                # Use the Patient model for transformation
+                # Use the new process_patient_record method (transformer + Patient model)
                 patient = self.process_patient_record(raw_patient)
                 if not patient:
                     continue
@@ -140,7 +163,7 @@ class ETLService:
             record_copy = record.copy()
             record_copy.pop('operation', None)
             
-            # Use Patient model for transformation
+            # Use transformer + Patient model
             try:
                 patient = self.process_patient_record(record_copy)
                 if not patient:

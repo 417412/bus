@@ -7,6 +7,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Union
 from datetime import datetime, date
 import re
+import logging
 
 @dataclass
 class Patient:
@@ -46,6 +47,8 @@ class Patient:
     
     def __post_init__(self):
         """Validate and normalize data after initialization."""
+        logger = logging.getLogger(__name__)
+        
         # Ensure hisnumber is string
         if self.hisnumber is not None:
             self.hisnumber = str(self.hisnumber)
@@ -68,6 +71,15 @@ class Patient:
                 # Extract digits only
                 digits = re.sub(r'\D', '', self.document_number)
                 self.document_number = int(digits) if digits else None
+        
+        # CRITICAL ADDITION: Validate and normalize document types
+        if self.documenttypes is not None:
+            # Define valid document type range (1-17 as per PostgreSQL schema)
+            valid_document_types = list(range(1, 18))  # 1 through 17
+            
+            if self.documenttypes not in valid_document_types:
+                logger.warning(f"Patient {self.hisnumber}: Invalid document type {self.documenttypes}, mapping to 'Other documents' (17)")
+                self.documenttypes = 17  # Map to "Other documents"
         
         # Validate source
         if self.source not in [1, 2]:

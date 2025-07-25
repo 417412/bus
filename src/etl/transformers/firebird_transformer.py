@@ -68,12 +68,6 @@ class FirebirdTransformer:
     def transform_patient(self, raw_patient: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform a raw patient record into standardized format.
-        
-        Args:
-            raw_patient: Raw patient data from Firebird
-            
-        Returns:
-            Standardized patient record
         """
         try:
             # Format birthdate
@@ -94,28 +88,29 @@ class FirebirdTransformer:
             
             # Build standardized patient record
             return {
-                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                "hisnumber": str(raw_patient.get('hisnumber', '')),
                 "source": raw_patient.get('source', 2),  # Инфоклиника = 2
-                "businessunit": raw_patient.get('businessunit', 2),  # Default businessunit for Инфоклиника
+                "businessunit": raw_patient.get('businessunit', 2),
                 "lastname": raw_patient.get('lastname'),
                 "name": raw_patient.get('name'),
                 "surname": raw_patient.get('surname'),
                 "birthdate": birthdate,
-                "documenttypes": doc_type,
+                "documenttypes": doc_type,  # This will now be 17 instead of 99!
                 "document_number": doc_number,
                 "email": raw_patient.get('email'),
                 "telephone": raw_patient.get('telephone'),
-                "his_password": raw_patient.get('his_password')
+                "his_password": raw_patient.get('his_password'),
+                "login_email": raw_patient.get('login_email')  # ADD THIS
             }
         except Exception as e:
             self.logger.error(f"Error transforming patient {raw_patient.get('hisnumber', 'unknown')}: {e}")
-            # Return a minimal record with the hisnumber and source to maintain data flow
             return {
-                "hisnumber": str(raw_patient.get('hisnumber', '')),  # Ensure string type
+                "hisnumber": str(raw_patient.get('hisnumber', '')),
                 "source": raw_patient.get('source', 2),
                 "businessunit": raw_patient.get('businessunit', 2),
-                "documenttypes": 17,  # Default to "Иные документы" for error cases
+                "documenttypes": 17,  # Default to "Иные документы"
                 "lastname": raw_patient.get('lastname'),
                 "name": raw_patient.get('name'),
-                "surname": raw_patient.get('surname')
+                "surname": raw_patient.get('surname'),
+                "login_email": raw_patient.get('login_email')  # ADD THIS TOO
             }
