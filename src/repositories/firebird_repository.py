@@ -102,14 +102,16 @@ class FirebirdRepository:
     def get_patient_deltas(self, batch_size: int = 100) -> Tuple[List[Dict[str, Any]], int]:
         """
         Fetch patient delta records from Firebird.
-        
-        Args:
-            batch_size: Maximum number of deltas to fetch
-            
-        Returns:
-            Tuple of (list of dictionaries with patient delta data, count of processed records)
         """
         self.logger.info(f"=== Starting get_patient_deltas with batch_size={batch_size} ===")
+        
+        # Force a fresh transaction by committing any pending work
+        try:
+            if hasattr(self.connector, 'connection') and self.connector.connection:
+                self.connector.connection.commit()
+                self.logger.debug("Committed pending transaction before delta query")
+        except Exception as e:
+            self.logger.debug(f"Transaction commit failed (may be normal): {e}")
         
         # Query to get deltas that haven't been processed yet
         query = """
@@ -149,7 +151,6 @@ class FirebirdRepository:
         self.logger.debug(f"Query: {query}")
             
         # Execute query
-        # Execute query
         try:
             rows, columns = self.connector.execute_query(query)
             
@@ -158,37 +159,41 @@ class FirebirdRepository:
             self.logger.info(f"Type of rows: {type(rows)}")
             self.logger.info(f"len(rows): {len(rows)}")
             self.logger.info(f"bool(rows): {bool(rows)}")
-            self.logger.info(f"rows is None: {rows is None}")
-            self.logger.info(f"Columns: {columns}")
             
-            # Check if rows is a list/tuple and what's in it
-            if hasattr(rows, '__iter__'):
-                self.logger.info(f"rows is iterable")
+            # Additional debugging for the systemd issue
+            if len(rows) == 0:
+                self.logger.warning("⚠ Zero rows returned - checking if records exist in delta table")
+                
+                # Check if there are any unprocessed records at all
+                check_query = "SELECT COUNT(*) FROM Medscan_delta_clients WHERE processed = 'N'"
                 try:
-                    rows_list = list(rows)
-                    self.logger.info(f"rows converted to list: {len(rows_list)} items")
-                    if rows_list:
-                        self.logger.info(f"First row: {rows_list[0]}")
-                        self.logger.info(f"Type of first row: {type(rows_list[0])}")
-                        self.logger.info(f"Length of first row: {len(rows_list[0]) if hasattr(rows_list[0], '__len__') else 'N/A'}")
-                except Exception as e:
-                    self.logger.error(f"Error converting rows to list: {e}")
+                    check_rows, _ = self.connector.execute_query(check_query)
+                    if check_rows and len(check_rows) > 0:
+                        unprocessed_count = check_rows[0][0]
+                        self.logger.warning(f"Database shows {unprocessed_count} unprocessed records exist")
+                        if unprocessed_count > 0:
+                            self.logger.error("🔥 TRANSACTION ISOLATION ISSUE: Records exist but query returns 0 rows")
+                            
+                            # Try to force a new transaction
+                            self.logger.info("Attempting to force fresh transaction...")
+                            if hasattr(self.connector, 'connection') and self.connector.connection:
+                                try:
+                                    self.connector.connection.rollback()
+                                    self.logger.info("Rolled back transaction")
+                                    
+                                    # Retry the query
+                                    self.logger.info("Retrying delta query after rollback...")
+                                    rows, columns = self.connector.execute_query(query)
+                                    self.logger.info(f"After rollback retry: len(rows) = {len(rows)}")
+                                    
+                                except Exception as rollback_error:
+                                    self.logger.error(f"Rollback failed: {rollback_error}")
+                    else:
+                        self.logger.info("No unprocessed records in delta table (this is normal)")
+                except Exception as check_error:
+                    self.logger.error(f"Error checking unprocessed record count: {check_error}")
             
-            # Try to iterate through rows manually
-            self.logger.info("Attempting to iterate through rows:")
-            try:
-                count = 0
-                for i, row in enumerate(rows):
-                    count += 1
-                    if i < 3:  # Only log first 3
-                        self.logger.info(f"Row {i}: {row} (type: {type(row)}, len: {len(row) if hasattr(row, '__len__') else 'N/A'})")
-                    if i >= 10:  # Don't log too many
-                        break
-                self.logger.info(f"Total rows found by iteration: {count}")
-            except Exception as e:
-                self.logger.error(f"Error iterating through rows: {e}")
-            
-            # Original check
+            # Original check and processing continues...
             if not rows:
                 self.logger.info("No delta records found, returning empty results")
                 return [], 0

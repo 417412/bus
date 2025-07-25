@@ -150,6 +150,15 @@ charset = {self.config.get('charset', 'cp1251')}
         """
         if not self.connection:
             raise Exception("Not connected to database")
+        
+        # For SELECT queries that might need fresh data (like delta queries),
+        # commit any pending transaction to start fresh
+        if query.strip().upper().startswith('SELECT') and 'delta' in query.lower():
+            try:
+                self.connection.commit()
+                self.logger.debug("Committed transaction before delta query to ensure fresh read")
+            except Exception as e:
+                self.logger.debug(f"Transaction commit before delta query failed (may be normal): {e}")
             
         with self.connection.cursor() as cursor:
             # Execute the query
@@ -165,10 +174,6 @@ charset = {self.config.get('charset', 'cp1251')}
                 self.logger.debug(f"Rows returned: {len(rows) if rows else 0}")
                 self.logger.debug(f"Column names: {column_names}")
                 self.logger.debug(f"Type of rows: {type(rows)}")
-                
-                # Additional debugging for the specific case
-                if hasattr(rows, '__len__') and len(rows) == 0 and rows:
-                    self.logger.warning(f"Strange case: len(rows)=0 but rows is truthy. rows={rows}")
                 
                 return rows, column_names
             else:
