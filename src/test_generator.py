@@ -8,19 +8,19 @@ It can test both inserts and updates.
 
 Examples:
     # Generate 10,000 test patients with 15% duplicates
-    python src/test_generator.py --mode insert --quantity 10000 -p your_password
+    python src/test_generator.py --mode insert --quantity 10000
     
     # Generate 50,000 patients with high duplicate rate
-    python src/test_generator.py --mode insert -q 50000 --duplicate-rate 0.3 -p your_password
+    python src/test_generator.py --mode insert -q 50000 --duplicate-rate 0.3
     
     # Update existing records (70% NULL documents, 30% field updates)
-    python src/test_generator.py --mode update -q 5000 -p your_password
+    python src/test_generator.py --mode update -q 5000
     
     # Memory-efficient generation for large datasets
-    python src/test_generator.py --mode insert -q 1000000 --memory-efficient -p your_password
+    python src/test_generator.py --mode insert -q 1000000 --memory-efficient
     
     # Custom database connection
-    python src/test_generator.py --mode insert -q 10000 -d my_db -u my_user -H 192.168.1.100 -p password
+    python src/test_generator.py --mode insert -q 10000 -d my_db -u my_user -H 192.168.1.100
 """
 
 import argparse
@@ -38,8 +38,8 @@ from typing import Dict, List, Tuple, Optional, Set
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
-# Import configuration
-from src.config.settings import DATABASE_CONFIG, setup_logger
+# Import configuration and password management
+from src.config.settings import get_decrypted_database_config, setup_logger, DOCUMENT_TYPES
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,16 +48,16 @@ def parse_args() -> argparse.Namespace:
         description='Generate test patient data for database testing',
         epilog="""
 Examples:
-  %(prog)s --mode insert --quantity 10000 -p password
+  %(prog)s --mode insert --quantity 10000
     Generate 10,000 test patients with default settings
     
-  %(prog)s --mode insert -q 50000 --duplicate-rate 0.3 -p password
+  %(prog)s --mode insert -q 50000 --duplicate-rate 0.3
     Generate 50,000 patients with 30%% document duplicates
     
-  %(prog)s --mode update -q 5000 -p password
+  %(prog)s --mode update -q 5000
     Update 5,000 existing records (70%% NULL docs, 30%% field updates)
     
-  %(prog)s --mode insert -q 1000000 --memory-efficient -p password
+  %(prog)s --mode insert -q 1000000 --memory-efficient
     Memory-efficient generation for large datasets
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -67,17 +67,15 @@ Examples:
     parser.add_argument('--mode', type=str, choices=['insert', 'update'], default='insert',
                         help='Test mode: insert new records or update existing ones')
     
-    # Database connection parameters
-    parser.add_argument('-d', '--db', type=str, default=DATABASE_CONFIG["PostgreSQL"]["database"],
-                        help=f'Database name (default: {DATABASE_CONFIG["PostgreSQL"]["database"]})')
-    parser.add_argument('-u', '--user', type=str, default=DATABASE_CONFIG["PostgreSQL"]["user"],
-                        help=f'Database user (default: {DATABASE_CONFIG["PostgreSQL"]["user"]})')
-    parser.add_argument('-p', '--password', type=str, required=True,
-                        help='Database password')
-    parser.add_argument('-H', '--host', type=str, default=DATABASE_CONFIG["PostgreSQL"]["host"],
-                        help=f'Database host (default: {DATABASE_CONFIG["PostgreSQL"]["host"]})')
-    parser.add_argument('--port', type=int, default=DATABASE_CONFIG["PostgreSQL"]["port"],
-                        help=f'Database port (default: {DATABASE_CONFIG["PostgreSQL"]["port"]})')
+    # Database connection parameters (optional overrides)
+    parser.add_argument('-d', '--db', type=str,
+                        help='Database name (overrides config)')
+    parser.add_argument('-u', '--user', type=str,
+                        help='Database user (overrides config)')
+    parser.add_argument('-H', '--host', type=str,
+                        help='Database host (overrides config)')
+    parser.add_argument('--port', type=int,
+                        help='Database port (overrides config)')
     
     # Insert mode parameters
     parser.add_argument('-q', '--quantity', type=int, default=100000,
@@ -137,20 +135,48 @@ class TestDataGenerator:
         # Set up logging
         self.logger = setup_logger(__name__, "test_generator")
         
-        self.russian_first_names = ["Александр", "Мария", "Дмитрий", "Анна", "Иван", "Елена", 
-                                   "Сергей", "Ольга", "Андрей", "Наталья", "Алексей", "Татьяна"]
-        self.russian_last_names = ["Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", 
-                                  "Петров", "Соколов", "Михайлов", "Новиков", "Федоров"]
-        self.russian_patronymics = ["Александрович", "Дмитриевич", "Иванович", "Сергеевич", 
-                                   "Андреевич", "Алексеевич", "Николаевич", "Владимирович"]
+        # Russian names with gender indication
+        self.russian_first_names_male = [
+            "Александр", "Дмитрий", "Иван", "Сергей", "Андрей", "Алексей", 
+            "Михаил", "Николай", "Владимир", "Виктор", "Игорь", "Олег",
+            "Павел", "Роман", "Максим", "Денис", "Антон", "Василий"
+        ]
         
-        # Female versions of patronymics and last names
-        self.russian_patronymics_f = [p.replace("вич", "вна") for p in self.russian_patronymics]
-        self.russian_last_names_f = [l + "а" if not l.endswith("ий") else 
-                                   l.replace("ий", "ая") for l in self.russian_last_names]
+        self.russian_first_names_female = [
+            "Мария", "Анна", "Елена", "Ольга", "Наталья", "Татьяна",
+            "Ирина", "Светлана", "Екатерина", "Людмила", "Галина", "Юлия",
+            "Валентина", "Надежда", "Любовь", "Вера", "Анастасия", "Оксана"
+        ]
         
-        # Combined list for easier random selection
-        self.all_last_names = self.russian_last_names + self.russian_last_names_f
+        self.russian_last_names_male = [
+            "Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", "Петров", 
+            "Соколов", "Михайлов", "Новиков", "Федоров", "Морозов", "Волков",
+            "Алексеев", "Лебедев", "Семенов", "Егоров", "Павлов", "Козлов"
+        ]
+        
+        self.russian_last_names_female = [
+            "Иванова", "Смирнова", "Кузнецова", "Попова", "Васильева", "Петрова",
+            "Соколова", "Михайлова", "Новикова", "Федорова", "Морозова", "Волкова",
+            "Алексеева", "Лебедева", "Семенова", "Егорова", "Павлова", "Козлова"
+        ]
+        
+        self.russian_patronymics_male = [
+            "Александрович", "Дмитриевич", "Иванович", "Сергеевич", 
+            "Андреевич", "Алексеевич", "Николаевич", "Владимирович",
+            "Викторович", "Игоревич", "Олегович", "Павлович"
+        ]
+        
+        self.russian_patronymics_female = [
+            "Александровна", "Дмитриевна", "Ивановна", "Сергеевна",
+            "Андреевна", "Алексеевна", "Николаевна", "Владимировна", 
+            "Викторовна", "Игоревна", "Олеговна", "Павловна"
+        ]
+        
+        # Email domains for login generation
+        self.email_domains = [
+            "gmail.com", "yandex.ru", "mail.ru", "rambler.ru", "outlook.com",
+            "infoclinica.ru", "skolkovomed.com", "example.com", "test.ru"
+        ]
         
         # Document type weights (1 is most common - passport)
         self.document_type_weights = {
@@ -210,22 +236,26 @@ class TestDataGenerator:
             cursor.execute("SELECT documenttypes, document_number FROM patients WHERE document_number IS NOT NULL")
             self.existing_documents = [(row[0], row[1]) for row in cursor.fetchall() if row[0] is not None]
             
-            # Get the highest HIS numbers
-            cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 1")
+            # Get the highest HIS numbers to avoid conflicts
+            cursor.execute("""
+                SELECT MAX(CAST(REGEXP_REPLACE(hisnumber, '[^0-9]', '', 'g') AS INTEGER))
+                FROM patientsdet 
+                WHERE source = 1 AND hisnumber ~ '^[A-Za-z]*[0-9]+' 
+                AND REGEXP_REPLACE(hisnumber, '[^0-9]', '', 'g') != ''
+            """)
             max_qms = cursor.fetchone()[0]
-            if max_qms and max_qms.startswith('QMS'):
-                try:
-                    self.qms_counter = int(max_qms[3:]) + 1
-                except ValueError:
-                    pass
+            if max_qms:
+                self.qms_counter = max_qms + 1
                     
-            cursor.execute("SELECT MAX(hisnumber) FROM patientsdet WHERE source = 2")
+            cursor.execute("""
+                SELECT MAX(CAST(REGEXP_REPLACE(hisnumber, '[^0-9]', '', 'g') AS INTEGER))
+                FROM patientsdet 
+                WHERE source = 2 AND hisnumber ~ '^[A-Za-z]*[0-9]+' 
+                AND REGEXP_REPLACE(hisnumber, '[^0-9]', '', 'g') != ''
+            """)
             max_infoclinica = cursor.fetchone()[0]
-            if max_infoclinica and max_infoclinica.startswith('IC'):
-                try:
-                    self.infoclinica_counter = int(max_infoclinica[2:]) + 1
-                except ValueError:
-                    pass
+            if max_infoclinica:
+                self.infoclinica_counter = max_infoclinica + 1
             
             self.logger.info(f"Loaded {len(self.existing_documents)} existing document numbers")
             self.logger.info(f"Starting HIS counters: qMS={self.qms_counter}, Infoclinica={self.infoclinica_counter}")
@@ -308,11 +338,10 @@ class TestDataGenerator:
     
     def generate_phone(self) -> str:
         """Generate a random Russian phone number."""
-        return f"+7{random.randint(900, 999)}{random.randint(1000000, 9999999)}"
+        return f"7{random.randint(900, 999)}{random.randint(1000000, 9999999)}"
     
-    def generate_email(self, first_name: str, last_name: str) -> str:
-        """Generate an email based on name."""
-        domains = ["gmail.com", "yandex.ru", "mail.ru", "rambler.ru", "outlook.com"]
+    def transliterate_name(self, name: str) -> str:
+        """Transliterate Russian name to Latin for email generation."""
         transliteration = {
             'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
             'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
@@ -321,8 +350,12 @@ class TestDataGenerator:
             'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
         }
         
-        first = ''.join(transliteration.get(c.lower(), c.lower()) for c in first_name)
-        last = ''.join(transliteration.get(c.lower(), c.lower()) for c in last_name)
+        return ''.join(transliteration.get(c.lower(), c.lower()) for c in name)
+    
+    def generate_contact_email(self, first_name: str, last_name: str) -> str:
+        """Generate a contact email based on name."""
+        first = self.transliterate_name(first_name)
+        last = self.transliterate_name(last_name)
         
         random_num = random.randint(1, 999)
         email_type = random.choice([
@@ -333,7 +366,34 @@ class TestDataGenerator:
             f"{first}{random_num}"
         ])
         
-        return f"{email_type}@{random.choice(domains)}"
+        return f"{email_type}@{random.choice(self.email_domains)}"
+    
+    def generate_login_email(self, first_name: str, last_name: str, his_id: int) -> str:
+        """
+        Generate a login email that's different from contact email.
+        Login emails tend to be more systematic and professional.
+        """
+        first = self.transliterate_name(first_name)
+        last = self.transliterate_name(last_name)
+        
+        if his_id == 1:  # qMS - tends to use more systematic logins
+            patterns = [
+                f"{first[0]}.{last}@skolkovomed.com",
+                f"{first}.{last[0]}@skolkovomed.com", 
+                f"{last}@skolkovomed.com",
+                f"{first}@skolkovomed.com",
+                f"{first}.{last}@skolkovomed.com"
+            ]
+        else:  # Infoclinica - different patterns
+            patterns = [
+                f"{first}.{last}@infoclinica.ru",
+                f"{last}.{first[0]}@infoclinica.ru",
+                f"{first[0]}{last}@infoclinica.ru",
+                f"user{random.randint(100, 999)}@infoclinica.ru",
+                f"{first}_{last}@infoclinica.ru"
+            ]
+        
+        return random.choice(patterns)
     
     def generate_his_number(self, his_id: int) -> str:
         """
@@ -345,12 +405,24 @@ class TestDataGenerator:
         Returns:
             A unique HIS number
         """
-        if his_id == 1:  # qMS
+        if his_id == 1:  # qMS - use different patterns
             self.qms_counter += 1
-            return f"QMS{self.qms_counter}"
+            patterns = [
+                f"{self.qms_counter}/A22",  # YottaDB style
+                f"{self.qms_counter}/A23",
+                f"{self.qms_counter}/A24",
+                f"QMS{self.qms_counter}",
+                f"{self.qms_counter}"
+            ]
+            return random.choice(patterns)
         else:  # Инфоклиника
             self.infoclinica_counter += 1
-            return f"IC{self.infoclinica_counter}"
+            patterns = [
+                f"IC{self.infoclinica_counter}",
+                f"{self.infoclinica_counter}",
+                f"INF{self.infoclinica_counter}"
+            ]
+            return random.choice(patterns)
     
     def generate_name(self) -> Tuple[str, str, str, bool]:
         """
@@ -362,13 +434,13 @@ class TestDataGenerator:
         is_female = random.choice([True, False])
         
         if is_female:
-            first_name = random.choice(self.russian_first_names[1::2])  # Female names
-            patronymic = random.choice(self.russian_patronymics_f)
-            last_name = random.choice(self.russian_last_names_f)
+            first_name = random.choice(self.russian_first_names_female)
+            patronymic = random.choice(self.russian_patronymics_female)
+            last_name = random.choice(self.russian_last_names_female)
         else:
-            first_name = random.choice(self.russian_first_names[0::2])  # Male names
-            patronymic = random.choice(self.russian_patronymics)
-            last_name = random.choice(self.russian_last_names)
+            first_name = random.choice(self.russian_first_names_male)
+            patronymic = random.choice(self.russian_patronymics_male)
+            last_name = random.choice(self.russian_last_names_male)
             
         return last_name, first_name, patronymic, is_female
     
@@ -396,7 +468,7 @@ class TestDataGenerator:
             Dictionary with patient data
         """
         his_id = random.choice([1, 2])  # 1 = qMS, 2 = Инфоклиника
-        business_unit_id = random.randint(1, 3)
+        business_unit_id = his_id  # For simplicity, business unit matches HIS
         
         # For some records, force a duplicate to test matching
         doc_type, doc_number = self.generate_document(force_duplicate)
@@ -408,8 +480,11 @@ class TestDataGenerator:
         # Generate other details
         his_number = self.generate_his_number(his_id)
         phone = self.generate_phone()
-        email = self.generate_email(first_name, last_name)
-        password = self.generate_password()
+        contact_email = self.generate_contact_email(first_name, last_name)
+        login_email = self.generate_login_email(first_name, last_name, his_id)
+        
+        # Generate password only for Infoclinica (qMS doesn't usually have passwords via API)
+        password = self.generate_password() if his_id == 2 else None
         
         record = {
             'hisnumber': his_number,
@@ -421,9 +496,10 @@ class TestDataGenerator:
             'birthdate': birthdate,
             'documenttypes': doc_type,
             'document_number': doc_number,
-            'email': email,
+            'email': contact_email,
             'telephone': phone,
-            'his_password': password
+            'his_password': password,
+            'login_email': login_email
         }
         
         self.logger.debug(f"Generated patient record: {his_number} ({last_name} {first_name})")
@@ -471,11 +547,11 @@ class TestDataGenerator:
                 cursor.execute("""
                 INSERT INTO patientsdet (
                     hisnumber, source, businessunit, lastname, name, surname, birthdate,
-                    documenttypes, document_number, email, telephone, his_password
+                    documenttypes, document_number, email, telephone, his_password, login_email
                 ) VALUES (
                     %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
                     %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
-                    %(email)s, %(telephone)s, %(his_password)s
+                    %(email)s, %(telephone)s, %(his_password)s, %(login_email)s
                 )
                 """, record)
                 success_count += 1
@@ -531,7 +607,7 @@ class TestDataGenerator:
         
         query = f"""
         SELECT id, hisnumber, source, businessunit, lastname, name, surname, 
-               birthdate, documenttypes, document_number, email, telephone, his_password, uuid
+               birthdate, documenttypes, document_number, email, telephone, his_password, login_email, uuid
         FROM patientsdet
         {where_clause}
         ORDER BY RANDOM()
@@ -557,7 +633,8 @@ class TestDataGenerator:
                     'email': row[10],
                     'telephone': row[11],
                     'his_password': row[12],
-                    'uuid': row[13]
+                    'login_email': row[13],
+                    'uuid': row[14]
                 })
             
             self.logger.debug(f"Fetched {len(rows)} rows for update (null_document_only={null_document_only})")
@@ -627,8 +704,8 @@ class TestDataGenerator:
             # Decide which fields to update
             fields_to_update = random.sample([
                 'lastname', 'name', 'surname', 'birthdate', 
-                'email', 'telephone', 'his_password'
-            ], random.randint(1, 3))
+                'email', 'telephone', 'his_password', 'login_email'
+            ], random.randint(1, 4))
             
             # Generate new values for selected fields
             if 'lastname' in fields_to_update or 'name' in fields_to_update or 'surname' in fields_to_update:
@@ -645,7 +722,10 @@ class TestDataGenerator:
                 update['birthdate'] = self.generate_birthdate()
             
             if 'email' in fields_to_update:
-                update['email'] = self.generate_email(update['name'], update['lastname'])
+                update['email'] = self.generate_contact_email(update['name'], update['lastname'])
+                
+            if 'login_email' in fields_to_update:
+                update['login_email'] = self.generate_login_email(update['name'], update['lastname'], update['source'])
             
             if 'telephone' in fields_to_update:
                 update['telephone'] = self.generate_phone()
@@ -737,19 +817,25 @@ class TestDataGenerator:
 
 def run_insert_test(args: argparse.Namespace):
     """Run the insert test mode."""
+    # Get database configuration with decrypted passwords
+    db_config = get_decrypted_database_config()
+    
     conn_params = {
-        'dbname': args.db,
-        'user': args.user,
-        'password': args.password,
-        'host': args.host,
-        'port': args.port
+        'dbname': args.db or db_config["PostgreSQL"]["database"],
+        'user': args.user or db_config["PostgreSQL"]["user"],
+        'password': db_config["PostgreSQL"]["password"],  # Always use decrypted password
+        'host': args.host or db_config["PostgreSQL"]["host"],
+        'port': args.port or db_config["PostgreSQL"]["port"]
     }
     
     generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient, quiet=args.quiet)
     
     try:
         conn = generator.connect_db()
-        generator._log_and_print(f"Connected to database {args.db}")
+        generator._log_and_print(f"Connected to database {conn_params['dbname']}")
+        
+        # Load existing data to avoid conflicts
+        generator.load_existing_data()
         
         total_records = args.quantity
         batch_size = args.batch_size
@@ -810,7 +896,7 @@ def run_insert_test(args: argparse.Namespace):
         generator.run_analyze(conn)
         
         # Print database statistics
-        print_database_stats(conn, generator.logger)
+        print_database_stats(conn, generator.logger, generator.quiet)
         
         conn.close()
         
@@ -825,19 +911,22 @@ def run_insert_test(args: argparse.Namespace):
 
 def run_update_test(args: argparse.Namespace):
     """Run the update test mode."""
+    # Get database configuration with decrypted passwords
+    db_config = get_decrypted_database_config()
+    
     conn_params = {
-        'dbname': args.db,
-        'user': args.user,
-        'password': args.password,
-        'host': args.host,
-        'port': args.port
+        'dbname': args.db or db_config["PostgreSQL"]["database"],
+        'user': args.user or db_config["PostgreSQL"]["user"],
+        'password': db_config["PostgreSQL"]["password"],  # Always use decrypted password
+        'host': args.host or db_config["PostgreSQL"]["host"],
+        'port': args.port or db_config["PostgreSQL"]["port"]
     }
     
     generator = TestDataGenerator(conn_params, args.duplicate_rate, args.memory_efficient, quiet=args.quiet)
     
     try:
         conn = generator.connect_db()
-        generator._log_and_print(f"Connected to database {args.db}")
+        generator._log_and_print(f"Connected to database {conn_params['dbname']}")
         
         # Load existing data for better updates
         generator.load_existing_data()
@@ -962,7 +1051,11 @@ def run_update_test(args: argparse.Namespace):
         generator._log_and_print("\nUpdate Test Results:")
         generator._log_and_print(f"Total records with NULL documents updated: {null_document_updates}")
         generator._log_and_print(f"Total records with field values updated: {field_updates}")
-        generator._log_and_print(f"Total merged patients: {original_stats['patients_count'] - final_stats['patients_count']}")
+        
+        if original_stats['patients_count'] > final_stats['patients_count']:
+            generator._log_and_print(f"Total merged patients: {original_stats['patients_count'] - final_stats['patients_count']}")
+        else:
+            generator._log_and_print("No patients were merged during this test")
         
         # Analyze log changes
         generator._log_and_print("\nMatching Log Changes:")
@@ -1065,32 +1158,27 @@ def print_stats_dict(stats: Dict, logger, quiet: bool = False):
     if 'document_types' in stats and stats['document_types']:
         log_and_print("Document type distribution:")
         for doc_type, count in stats['document_types'].items():
-            doc_name = get_document_type_name(doc_type)
+            doc_name = DOCUMENT_TYPES.get(doc_type, f"Unknown type ({doc_type})")
             if stats['patientsdet_count'] > stats['null_document_count']:
                 percentage = count/(stats['patientsdet_count']-stats['null_document_count'])*100
                 log_and_print(f"  - {doc_name} (ID: {doc_type}): {count} ({percentage:.1f}%)")
             else:
                 log_and_print(f"  - {doc_name} (ID: {doc_type}): {count}")
     
-    log_and_print("Matching log entries:")
-    for match_type, count in stats['log_stats'].items():
-        if stats['patientsdet_count'] > 0:
-            percentage = count/stats['patientsdet_count']*100
-            log_and_print(f"  - {match_type}: {count} ({percentage:.1f}%)")
-        else:
-            log_and_print(f"  - {match_type}: {count}")
+    if 'log_stats' in stats and stats['log_stats']:
+        log_and_print("Matching log entries:")
+        for match_type, count in stats['log_stats'].items():
+            if stats['patientsdet_count'] > 0:
+                percentage = count/stats['patientsdet_count']*100
+                log_and_print(f"  - {match_type}: {count} ({percentage:.1f}%)")
+            else:
+                log_and_print(f"  - {match_type}: {count}")
 
 
-def get_document_type_name(doc_type: int) -> str:
-    """Get a human-readable name for a document type ID."""
-    from src.config.settings import DOCUMENT_TYPES
-    return DOCUMENT_TYPES.get(doc_type, f'Неизвестный тип ({doc_type})')
-
-
-def print_database_stats(conn: psycopg2.extensions.connection, logger):
+def print_database_stats(conn: psycopg2.extensions.connection, logger, quiet: bool = False):
     """Print current database statistics."""
     stats = get_database_stats(conn, logger)
-    print_stats_dict(stats, logger)
+    print_stats_dict(stats, logger, quiet)
 
 
 def show_help_examples():
@@ -1099,32 +1187,30 @@ def show_help_examples():
 Detailed Usage Examples:
 
 1. Basic insert test (10,000 records with default 15% duplicates):
-   python src/test_generator.py --mode insert --quantity 10000 -p your_password
+   python src/test_generator.py --mode insert --quantity 10000
 
 2. High-volume insert with more duplicates:
-   python src/test_generator.py --mode insert -q 100000 --duplicate-rate 0.25 -p your_password
+   python src/test_generator.py --mode insert -q 100000 --duplicate-rate 0.25
 
 3. Memory-efficient mode for very large datasets:
-   python src/test_generator.py --mode insert -q 1000000 --memory-efficient --batch-size 500 -p your_password
+   python src/test_generator.py --mode insert -q 1000000 --memory-efficient --batch-size 500
 
 4. Update test (modify existing records):
-   python src/test_generator.py --mode update -q 5000 -p your_password
+   python src/test_generator.py --mode update -q 5000
 
 5. Custom update rates:
    python src/test_generator.py --mode update -q 10000 \\
      --update-null-document-rate 0.8 \\
      --update-fields-rate 0.2 \\
-     --match-existing-document-rate 0.6 \\
-     -p your_password
+     --match-existing-document-rate 0.6
 
 6. Connect to remote database:
    python src/test_generator.py --mode insert -q 50000 \\
-     -d my_database -u my_user -H 192.168.1.100 --port 5432 \\
-     -p your_password
+     -d my_database -u my_user -H 192.168.1.100 --port 5432
 
 7. Quiet mode with debug logging:
    python src/test_generator.py --mode insert -q 10000 \\
-     --quiet --log-level DEBUG -p your_password
+     --quiet --log-level DEBUG
 
 Performance Options:
 - --memory-efficient: Use less memory for large datasets (slower)
@@ -1136,6 +1222,15 @@ Update Mode Details:
 - --update-null-document-rate: Fraction of records that will have NULL documents filled
 - --update-fields-rate: Fraction of records that will have field values updated
 - --match-existing-document-rate: Of the NULL->document updates, how many should match existing documents (triggers merging)
+
+Features:
+- Uses encrypted password configuration from settings.py
+- Generates realistic Russian names with proper gender matching
+- Creates both contact emails and separate login emails
+- Generates appropriate document numbers based on document type
+- Supports both qMS and Infoclinica HIS number patterns
+- Comprehensive logging and progress tracking
+- Memory-efficient processing for large datasets
 
 Logging:
 - All operations are logged to logs/test_generator.log
@@ -1163,6 +1258,7 @@ def main():
         if not args.quiet:
             print("Running in INSERT test mode")
             print(f"Will generate {args.quantity} records with {args.duplicate_rate:.1%} duplicate rate")
+            print("Using encrypted password configuration from settings.py")
         return run_insert_test(args)
     else:  # update mode
         if not args.quiet:
@@ -1170,6 +1266,7 @@ def main():
             print(f"Will process {args.quantity} updates:")
             print(f"  - {args.update_null_document_rate:.1%} NULL document updates")
             print(f"  - {args.update_fields_rate:.1%} field value updates")
+            print("Using encrypted password configuration from settings.py")
         return run_update_test(args)
 
 

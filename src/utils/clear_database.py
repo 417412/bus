@@ -318,6 +318,7 @@ def reinitialize_database(conn: psycopg2.extensions.connection, args: argparse.N
     # Paths to SQL files
     schema_file = os.path.join(project_root, 'schema', 'schema.sql')
     trigger_file = os.path.join(project_root, 'triggers', 'matching_trigger.sql')
+    indexes_file = os.path.join(project_root, 'triggers', 'create_indexes.sql')
     
     # Execute schema file
     logger.info("Creating database schema...")
@@ -329,6 +330,12 @@ def reinitialize_database(conn: psycopg2.extensions.connection, args: argparse.N
     logger.info("Creating triggers...")
     if not execute_sql_file(conn, trigger_file, args):
         logger.error("Failed to create triggers")
+        return False
+    
+    # Execute indexes file
+    logger.info("Creating database indexes...")
+    if not execute_sql_file(conn, indexes_file, args):
+        logger.error("Failed to create indexes")
         return False
     
     logger.info("Database schema and triggers created successfully")
