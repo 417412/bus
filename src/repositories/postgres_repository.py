@@ -32,11 +32,11 @@ class PostgresRepository:
             cursor.execute("""
                 INSERT INTO patientsdet (
                     hisnumber, source, businessunit, lastname, name, surname, birthdate,
-                    documenttypes, document_number, email, telephone, his_password
+                    documenttypes, document_number, email, telephone, his_password, login_email
                 ) VALUES (
                     %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
                     %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
-                    %(email)s, %(telephone)s, %(his_password)s
+                    %(email)s, %(telephone)s, %(his_password)s, %(login_email)s
                 )
             """, patient_data)
             
@@ -81,7 +81,7 @@ class PostgresRepository:
                 columns = [
                     'id', 'hisnumber', 'source', 'businessunit', 'lastname', 'name', 'surname', 
                     'birthdate', 'documenttypes', 'document_number', 'email', 'telephone', 'his_password', 
-                    'uuid', 'p_documenttypes', 'p_document_number', 'p_uuid'
+                    'login_email', 'uuid', 'p_documenttypes', 'p_document_number', 'p_uuid'
                 ]
                 return dict(zip(columns, result))
             return None
@@ -108,11 +108,11 @@ class PostgresRepository:
             cursor.execute("""
                 INSERT INTO patientsdet (
                     hisnumber, source, businessunit, lastname, name, surname, birthdate,
-                    documenttypes, document_number, email, telephone, his_password
+                    documenttypes, document_number, email, telephone, his_password, login_email
                 ) VALUES (
                     %(hisnumber)s, %(source)s, %(businessunit)s, %(lastname)s, 
                     %(name)s, %(surname)s, %(birthdate)s, %(documenttypes)s, %(document_number)s, 
-                    %(email)s, %(telephone)s, %(his_password)s
+                    %(email)s, %(telephone)s, %(his_password)s, %(login_email)s
                 )
                 ON CONFLICT (hisnumber, source) 
                 DO UPDATE SET
@@ -125,7 +125,8 @@ class PostgresRepository:
                     document_number = EXCLUDED.document_number,
                     email = EXCLUDED.email,
                     telephone = EXCLUDED.telephone,
-                    his_password = EXCLUDED.his_password
+                    his_password = EXCLUDED.his_password,
+                    login_email = EXCLUDED.login_email
             """, patient_data)
             
             self.connector.connection.commit()
