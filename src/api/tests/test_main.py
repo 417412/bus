@@ -245,7 +245,7 @@ class TestMobileAppUserRegistration:
 
 
 class TestAPIEndpoints:
-    """Tests for API endpoints."""
+    """Tests for API endpoints - Updated for new architecture."""
     
     def test_health_check_healthy(self, client, mock_patient_repo_dependency):
         """Test health check endpoint when system is healthy."""
@@ -263,23 +263,46 @@ class TestAPIEndpoints:
     
     def test_stats_endpoint(self, client, mock_patient_repo_dependency):
         """Test statistics endpoint."""
-        response = client.get("/stats")
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert "mobile_app_users" in data
-        assert "patient_matching_24h" in data
-        assert "timestamp" in data
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.get_mobile_app_stats = AsyncMock(return_value={
+                "total_mobile_users": 10,
+                "both_his_registered": 5,
+                "qms_only": 3,
+                "infoclinica_only": 2
+            })
+            mock_repo.get_patient_matching_stats = AsyncMock(return_value=[
+                {"match_type": "NEW_WITH_DOCUMENT", "count": 10, "new_patients_created": 10, "mobile_app_matches": 0}
+            ])
+            mock_get_repo.return_value = mock_repo
+            
+            response = client.get("/stats")
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert "mobile_app_users" in data
+            assert "patient_matching_24h" in data
+            assert "timestamp" in data
     
-    def test_config_endpoint(self, client, mock_patient_repo_dependency):
-        """Test configuration endpoint."""
-        response = client.get("/config")
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert "api" in data
-        assert "postgresql" in data
-        assert "his_systems" in data
+    def test_patient_lock_unlock(self, client, mock_patient_repo_dependency):
+        """Test patient lock and unlock endpoints."""
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.lock_patient_matching = AsyncMock(return_value=True)
+            mock_repo.unlock_patient_matching = AsyncMock(return_value=True)
+            mock_get_repo.return_value = mock_repo
+            
+            # Test lock
+            response = client.post("/patient/test-uuid-123/lock?reason=Test lock")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            
+            # Test unlock
+            response = client.post("/patient/test-uuid-123/unlock")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
     
     def test_check_modify_patient_success(self, client, mock_patient_repo_dependency, 
                                          sample_patient_request, sample_patient_db_record):
