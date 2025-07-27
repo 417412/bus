@@ -9,34 +9,55 @@ import sys
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
+import uuid as uuid_module
 
 # Add the parent directory to the path
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(parent_dir)
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import httpx
 import asyncio
-import uuid as uuid_module
 
-# Import only PostgreSQL components
-from src.config.settings import setup_logger, get_decrypted_database_config
-from src.connectors.postgres_connector import PostgresConnector
+# Import configuration and database
+from src.api.config import (
+    API_CONFIG, HIS_API_CONFIG, MOBILE_APP_CONFIG, SECURITY_CONFIG,
+    get_api_config, validate_config, setup_api_logger
+)
+from src.api.database import (
+    initialize_database, close_database, get_database_health,
+    get_patient_repository, PatientRepository
+)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = setup_logger("patient_api", "api")
+logger = setup_api_logger("patient_api")
+
+# Validate configuration on startup
+config_issues = validate_config()
+if config_issues:
+    logger.warning(f"Configuration issues detected: {config_issues}")
 
 # Create FastAPI app
 app = FastAPI(
-    title="Patient Credential Management API",
-    description="API for managing patient credentials across HIS systems",
-    version="1.0.0",
+    title=API_CONFIG["title"],
+    description=API_CONFIG["description"],
+    version=API_CONFIG["version"],
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Add CORS middleware
+if SECURITY_CONFIG["cors_enabled"]:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=SECURITY_CONFIG["cors_origins"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["*"],
+    )
 
 # Pydantic models
 class PatientCredentialRequest(BaseModel):
@@ -62,138 +83,37 @@ class PatientResponse(BaseModel):
     success: str = Field(..., description="Operation success status")
     message: Optional[str] = Field(None, description="Additional message")
     action: Optional[str] = Field(None, description="Action performed (update/create)")
+    mobile_uuid: Optional[str] = Field(None, description="Mobile app user UUID if created")
 
-# Configuration for HIS API endpoints with OAuth
-HIS_API_CONFIG = {
-    "yottadb": {
-        "base_url": os.getenv("YOTTADB_API_BASE", "http://192.168.156.43"),
-        "credentials_endpoint": "/updatePatients/{hisnumber}/credentials",
-        "create_endpoint": "/createPatients",
-        "oauth": {
-            "token_url": os.getenv("YOTTADB_TOKEN_URL", "http://192.168.156.43/oauth/token"),
-            "client_id": os.getenv("YOTTADB_CLIENT_ID", "yottadb_client"),
-            "client_secret": os.getenv("YOTTADB_CLIENT_SECRET", "yottadb_secret"),
-            "username": os.getenv("YOTTADB_USERNAME", "api_user"),
-            "password": os.getenv("YOTTADB_PASSWORD", "api_password"),
-            "scope": os.getenv("YOTTADB_SCOPE", "patient_update")
-        }
-    },
-    "firebird": {
-        "base_url": os.getenv("FIREBIRD_API_BASE", "http://firebird-server"),
-        "credentials_endpoint": "/updatePatients/{hisnumber}/credentials",
-        "create_endpoint": "/createPatients",
-        "oauth": {
-            "token_url": os.getenv("FIREBIRD_TOKEN_URL", "http://firebird-server/oauth/token"),
-            "client_id": os.getenv("FIREBIRD_CLIENT_ID", "firebird_client"),
-            "client_secret": os.getenv("FIREBIRD_CLIENT_SECRET", "firebird_secret"),
-            "username": os.getenv("FIREBIRD_USERNAME", "api_user"),
-            "password": os.getenv("FIREBIRD_PASSWORD", "api_password"),
-            "scope": os.getenv("FIREBIRD_SCOPE", "patient_update")
-        }
-    }
-}
+# Global OAuth token cache
+oauth_tokens = {}
 
-# Global database connection and token cache
-pg_connector = None
-oauth_tokens = {}  # Cache for OAuth tokens
+# Dependency to get patient repository
+def get_patient_repo() -> PatientRepository:
+    return get_patient_repository()
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection on startup."""
-    global pg_connector
-    
     try:
-        logger.info("Initializing PostgreSQL connection...")
-        pg_connector = PostgresConnector()
+        logger.info("Initializing Patient Credential Management API...")
         
-        if not pg_connector.connect():
-            logger.error("Failed to connect to PostgreSQL database")
-            raise Exception("PostgreSQL connection failed")
+        # Initialize database
+        if not await initialize_database():
+            raise Exception("Database initialization failed")
         
-        logger.info("PostgreSQL connection initialized successfully")
+        logger.info("API initialization completed successfully")
         
     except Exception as e:
-        logger.error(f"Failed to initialize database connection: {e}")
+        logger.error(f"Failed to initialize API: {e}")
         raise e
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up database connection on shutdown."""
-    global pg_connector
-    
-    if pg_connector:
-        pg_connector.disconnect()
-        logger.info("PostgreSQL connection closed")
-
-def find_patient_by_credentials(lastname: str, firstname: str, midname: Optional[str], 
-                               bdate: str, cllogin: str) -> Optional[Dict[str, Any]]:
-    """
-    Find patient in PostgreSQL database by demographic data and login.
-    
-    Args:
-        lastname: Patient's last name
-        firstname: Patient's first name (maps to 'name' column)
-        midname: Patient's middle name (maps to 'surname' column)
-        bdate: Patient's birth date  
-        cllogin: Patient's login (check both login_qms and login_infoclinica)
-        
-    Returns:
-        Patient record dict or None if not found
-    """
-    try:
-        # Build the query to find patient by demographics and login
-        if midname:
-            query = """
-                SELECT 
-                    uuid, lastname, name, surname, birthdate,
-                    hisnumber_qms, hisnumber_infoclinica,
-                    login_qms, login_infoclinica
-                FROM patients 
-                WHERE lastname = %s 
-                AND name = %s 
-                AND surname = %s
-                AND birthdate = %s
-                AND (login_qms = %s OR login_infoclinica = %s)
-            """
-            params = (lastname, firstname, midname, bdate, cllogin, cllogin)
-        else:
-            query = """
-                SELECT 
-                    uuid, lastname, name, surname, birthdate,
-                    hisnumber_qms, hisnumber_infoclinica,
-                    login_qms, login_infoclinica
-                FROM patients 
-                WHERE lastname = %s 
-                AND name = %s 
-                AND (surname IS NULL OR surname = '')
-                AND birthdate = %s
-                AND (login_qms = %s OR login_infoclinica = %s)
-            """
-            params = (lastname, firstname, bdate, cllogin, cllogin)
-        
-        logger.debug(f"Executing patient search query with params: {params}")
-        
-        rows, columns = pg_connector.execute_query(query, params)
-        
-        if not rows:
-            logger.info(f"No patient found with credentials: {lastname}, {firstname}, {midname}, {bdate}, {cllogin}")
-            return None
-        
-        if len(rows) > 1:
-            logger.warning(f"Multiple patients found with same credentials, using first one")
-        
-        # Convert to dict
-        patient = dict(zip(columns, rows[0]))
-        logger.info(f"Found patient: UUID={patient['uuid']}, QMS={patient['hisnumber_qms']}, IC={patient['hisnumber_infoclinica']}")
-        
-        return patient
-        
-    except Exception as e:
-        logger.error(f"Error searching for patient: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
-        )
+    """Clean up resources on shutdown."""
+    logger.info("Shutting down Patient Credential Management API...")
+    await close_database()
+    logger.info("API shutdown completed")
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
     """
@@ -345,7 +265,7 @@ async def update_his_credentials(his_type: str, hisnumber: str, cllogin: str, cl
         logger.error(f"Error updating {his_type.upper()} credentials for patient {hisnumber}: {e}")
         return False
 
-async def create_his_patient(his_type: str, patient_data: PatientCredentialRequest) -> bool:
+async def create_his_patient(his_type: str, patient_data: PatientCredentialRequest) -> dict:
     """
     Create patient in specified HIS system via authenticated API call.
     
@@ -354,14 +274,14 @@ async def create_his_patient(his_type: str, patient_data: PatientCredentialReque
         patient_data: Patient data for creation
         
     Returns:
-        True if successful (HTTP 201), False otherwise
+        Dict with success status and hisnumber if successful
     """
     try:
         # Step 1: Get OAuth token
         access_token = await get_oauth_token(his_type)
         if not access_token:
             logger.error(f"Failed to obtain OAuth token for {his_type.upper()} patient creation")
-            return False
+            return {"success": False, "error": "OAuth authentication failed"}
         
         # Step 2: Prepare API call
         config = HIS_API_CONFIG[his_type]
@@ -390,8 +310,23 @@ async def create_his_patient(his_type: str, patient_data: PatientCredentialReque
             response = await client.post(url, json=payload, headers=headers)
             
             if response.status_code == 201:
-                logger.info(f"Successfully created patient in {his_type.upper()}: {patient_data.lastname}, {patient_data.firstname}")
-                return True
+                try:
+                    response_data = response.json()
+                    hisnumber = response_data.get("pcode")
+                    fullname = response_data.get("fullname", "")
+                    message = response_data.get("message", "Patient created successfully")
+                    
+                    logger.info(f"Successfully created patient in {his_type.upper()}: {fullname} (HIS#{hisnumber})")
+                    return {
+                        "success": True,
+                        "hisnumber": hisnumber,
+                        "fullname": fullname,
+                        "message": message
+                    }
+                except Exception as json_error:
+                    logger.warning(f"Failed to parse {his_type.upper()} response JSON, but creation was successful: {json_error}")
+                    return {"success": True, "message": "Patient created successfully"}
+                    
             elif response.status_code == 401:
                 # Token might be expired, clear cache and retry once
                 cache_key = f"{his_type}_token"
@@ -410,39 +345,92 @@ async def create_his_patient(his_type: str, patient_data: PatientCredentialReque
                     retry_response = await client.post(url, json=payload, headers=headers)
                     
                     if retry_response.status_code == 201:
-                        logger.info(f"Successfully created patient in {his_type.upper()} (retry): {patient_data.lastname}, {patient_data.firstname}")
-                        return True
+                        try:
+                            retry_data = retry_response.json()
+                            hisnumber = retry_data.get("pcode")
+                            fullname = retry_data.get("fullname", "")
+                            message = retry_data.get("message", "Patient created successfully")
+                            
+                            logger.info(f"Successfully created patient in {his_type.upper()} (retry): {fullname} (HIS#{hisnumber})")
+                            return {
+                                "success": True,
+                                "hisnumber": hisnumber,
+                                "fullname": fullname,
+                                "message": message
+                            }
+                        except Exception as json_error:
+                            logger.warning(f"Failed to parse {his_type.upper()} retry response JSON, but creation was successful: {json_error}")
+                            return {"success": True, "message": "Patient created successfully (retry)"}
                     else:
                         logger.error(f"{his_type.upper()} patient creation failed on retry: {retry_response.status_code} - {retry_response.text}")
-                        return False
+                        return {"success": False, "error": f"Creation failed on retry: {retry_response.status_code}"}
                 else:
                     logger.error(f"Failed to get new OAuth token for {his_type.upper()} patient creation retry")
-                    return False
+                    return {"success": False, "error": "Failed to refresh OAuth token"}
             else:
                 logger.error(f"{his_type.upper()} patient creation failed: {response.status_code} - {response.text}")
-                return False
+                return {"success": False, "error": f"Creation failed: {response.status_code} - {response.text}"}
                 
     except Exception as e:
         logger.error(f"Error creating patient in {his_type.upper()}: {e}")
-        return False
+        return {"success": False, "error": str(e)}
+
+async def register_mobile_app_user_api(hisnumber_qms: Optional[str] = None, 
+                                      hisnumber_infoclinica: Optional[str] = None,
+                                      patient_repo: PatientRepository = None) -> Optional[str]:
+    """
+    Register a mobile app user and return the UUID.
+    This should be called when both HIS patient creation calls succeed.
+    """
+    try:
+        if not MOBILE_APP_CONFIG["registration_enabled"]:
+            logger.info("Mobile app registration is disabled")
+            return None
+        
+        if not hisnumber_qms and not hisnumber_infoclinica:
+            logger.error("Cannot register mobile app user without at least one HIS number")
+            return None
+        
+        if MOBILE_APP_CONFIG["require_both_his"] and (not hisnumber_qms or not hisnumber_infoclinica):
+            logger.error("Mobile app configuration requires both HIS numbers")
+            return None
+        
+        if not patient_repo:
+            patient_repo = get_patient_repository()
+        
+        mobile_uuid = await patient_repo.register_mobile_app_user(hisnumber_qms, hisnumber_infoclinica)
+        
+        if mobile_uuid:
+            logger.info(f"Successfully registered mobile app user: {mobile_uuid}")
+        else:
+            logger.error("Failed to register mobile app user")
+        
+        return mobile_uuid
+        
+    except Exception as e:
+        logger.error(f"Error registering mobile app user: {e}")
+        return None
 
 @app.post("/checkModifyPatient", response_model=PatientResponse)
-async def check_modify_patient(request: PatientCredentialRequest):
+async def check_modify_patient(request: PatientCredentialRequest,
+                             patient_repo: PatientRepository = Depends(get_patient_repo)):
     """
     Check and modify patient credentials across HIS systems.
-    If patient not found, creates patient in both HIS systems.
+    If patient not found, creates patient in both HIS systems and registers mobile app user.
     
     This endpoint:
     1. Searches for the patient in PostgreSQL using demographic data and login
     2. If found: Updates credentials in both YottaDB and Firebird via authenticated API calls
     3. If not found: Creates patient in both YottaDB and Firebird via authenticated API calls
-    4. Returns success status with action performed
+    4. Registers mobile app user if creation succeeded and configuration allows
+    5. Returns success status with action performed
     
     Args:
         request: Patient credential request containing demographic data and credentials
+        patient_repo: Patient repository dependency
         
     Returns:
-        PatientResponse with success status and action performed
+        PatientResponse with success status, action performed, and mobile UUID if created
         
     Raises:
         HTTPException: If both update/create operations fail
@@ -451,7 +439,7 @@ async def check_modify_patient(request: PatientCredentialRequest):
     
     try:
         # Step 1: Find patient in PostgreSQL database
-        patient = find_patient_by_credentials(
+        patient = await patient_repo.find_patient_by_credentials(
             lastname=request.lastname,
             firstname=request.firstname,
             midname=request.midname,
@@ -581,30 +569,27 @@ async def check_modify_patient(request: PatientCredentialRequest):
                     logger.error(f"{system_name} creation failed")
                     failed_systems.append(system_name)
             
-            # Register mobile app user if at least one creation succeeded
+            # Register mobile app user if enabled and at least one creation succeeded
             mobile_uuid = None
-            if success_count > 0 and created_hisnumbers:
-                mobile_uuid = await register_mobile_app_user(
-                    hisnumber_qms=created_hisnumbers.get('yottadb'),
-                    hisnumber_infoclinica=created_hisnumbers.get('firebird')
-                )
+            if (MOBILE_APP_CONFIG["auto_register_on_create"] and 
+                success_count > 0 and created_hisnumbers):
                 
-                if mobile_uuid:
-                    logger.info(f"Mobile app user registered with UUID: {mobile_uuid}")
-                else:
-                    logger.warning("Failed to register mobile app user despite successful HIS creations")
+                mobile_uuid = await register_mobile_app_user_api(
+                    hisnumber_qms=created_hisnumbers.get('yottadb'),
+                    hisnumber_infoclinica=created_hisnumbers.get('firebird'),
+                    patient_repo=patient_repo
+                )
             
             # Return appropriate response for creation
             if success_count == len(create_tasks):
                 logger.info(f"All {success_count} patient creations completed successfully")
                 response_message = f"Patient created successfully in {success_count} system(s): {', '.join(systems_to_create)}"
-                if mobile_uuid:
-                    response_message += f" (Mobile UUID: {mobile_uuid})"
                 
                 return PatientResponse(
                     success="true",
                     message=response_message,
-                    action="create"
+                    action="create",
+                    mobile_uuid=mobile_uuid
                 )
             elif success_count > 0:
                 logger.warning(f"Partial success: {success_count}/{len(create_tasks)} creations completed")
@@ -613,13 +598,12 @@ async def check_modify_patient(request: PatientCredentialRequest):
                                        (result and not isinstance(result, Exception))]
                 failed_list = ", ".join(failed_systems)
                 response_message = f"Patient created in: {', '.join(successful_systems)}. Failed: {failed_list}"
-                if mobile_uuid:
-                    response_message += f" (Mobile UUID: {mobile_uuid})"
                 
                 return PatientResponse(
                     success="partial",
                     message=response_message,
-                    action="create"
+                    action="create",
+                    mobile_uuid=mobile_uuid
                 )
             else:
                 logger.error("All patient creation operations failed")
@@ -640,16 +624,12 @@ async def check_modify_patient(request: PatientCredentialRequest):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Enhanced health check endpoint."""
     try:
-        # Test database connection
-        if pg_connector and pg_connector.connection:
-            rows, columns = pg_connector.execute_query("SELECT 1")
-            db_status = "connected" if rows else "error"
-        else:
-            db_status = "disconnected"
+        # Get database health
+        db_health = await get_database_health()
         
-        # Test OAuth token availability (without exposing sensitive data)
+        # Get OAuth token status
         oauth_status = {}
         for his_type in ["yottadb", "firebird"]:
             cache_key = f"{his_type}_token"
@@ -658,11 +638,21 @@ async def health_check():
             else:
                 oauth_status[his_type] = "no_token"
         
-        return {
-            "status": "healthy",
+        # Get configuration summary
+        config = get_api_config()
+        
+        health_data = {
+            "status": "healthy" if db_health["status"] == "healthy" else "degraded",
             "timestamp": datetime.now().isoformat(),
-            "database": db_status,
+            "version": API_CONFIG["version"],
+            "environment": config["environment"],
+            "database": db_health,
             "oauth_tokens": oauth_status,
+            "mobile_app": {
+                "registration_enabled": MOBILE_APP_CONFIG["registration_enabled"],
+                "auto_register": MOBILE_APP_CONFIG["auto_register_on_create"],
+                "require_both_his": MOBILE_APP_CONFIG["require_both_his"]
+            },
             "his_endpoints": {
                 "yottadb": {
                     "base_url": HIS_API_CONFIG["yottadb"]["base_url"],
@@ -674,6 +664,10 @@ async def health_check():
                 }
             }
         }
+        
+        status_code = 200 if health_data["status"] == "healthy" else 503
+        return JSONResponse(content=health_data, status_code=status_code)
+        
     except Exception as e:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -682,6 +676,38 @@ async def health_check():
                 "timestamp": datetime.now().isoformat(),
                 "error": str(e)
             }
+        )
+
+@app.get("/stats")
+async def get_api_stats(patient_repo: PatientRepository = Depends(get_patient_repo)):
+    """Get API and database statistics."""
+    try:
+        mobile_stats = await patient_repo.get_mobile_app_stats()
+        matching_stats = await patient_repo.get_patient_matching_stats()
+        
+        return {
+            "mobile_app_users": mobile_stats,
+            "patient_matching_24h": matching_stats,
+            "oauth_tokens_cached": len([k for k in oauth_tokens.keys() if not k.endswith('_expiry')]),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting API stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving statistics: {str(e)}"
+        )
+
+@app.get("/config")
+async def get_configuration():
+    """Get current API configuration (sensitive data masked)."""
+    try:
+        from src.api.config import get_config_summary
+        return get_config_summary()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving configuration: {str(e)}"
         )
 
 @app.post("/test-oauth/{his_type}")
@@ -729,18 +755,21 @@ async def test_patient_creation(his_type: str, patient_data: PatientCredentialRe
     
     try:
         result = await create_his_patient(his_type, patient_data)
-        if result:
+        if result.get("success"):
             return {
                 "success": True,
                 "message": f"Patient creation successful in {his_type.upper()}",
-                "patient": f"{patient_data.lastname}, {patient_data.firstname}"
+                "patient": f"{patient_data.lastname}, {patient_data.firstname}",
+                "hisnumber": result.get("hisnumber"),
+                "details": result
             }
         else:
             return JSONResponse(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 content={
                     "success": False,
-                    "message": f"Patient creation failed in {his_type.upper()}"
+                    "message": f"Patient creation failed in {his_type.upper()}",
+                    "error": result.get("error", "Unknown error")
                 }
             )
     except Exception as e:
@@ -751,166 +780,116 @@ async def test_patient_creation(his_type: str, patient_data: PatientCredentialRe
                 "message": f"Error testing patient creation for {his_type.upper()}: {str(e)}"
             }
         )
-    
-async def register_mobile_app_user(hisnumber_qms: Optional[str] = None, 
-                                  hisnumber_infoclinica: Optional[str] = None) -> Optional[str]:
-    """
-    Register a mobile app user and return the UUID.
-    This should be called when both HIS patient creation calls succeed.
-    
-    Args:
-        hisnumber_qms: Patient number from YottaDB if created
-        hisnumber_infoclinica: Patient number from Firebird if created
-        
-    Returns:
-        UUID string of the created mobile app user, or None if failed
-    """
+
+@app.post("/mobile-user/register")
+async def register_mobile_user(hisnumber_qms: Optional[str] = None,
+                              hisnumber_infoclinica: Optional[str] = None,
+                              patient_repo: PatientRepository = Depends(get_patient_repo)):
+    """Manually register a mobile app user."""
     try:
-        if not hisnumber_qms and not hisnumber_infoclinica:
-            logger.error("Cannot register mobile app user without at least one HIS number")
-            return None
+        if not MOBILE_APP_CONFIG["registration_enabled"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Mobile app registration is disabled"
+            )
         
-        # Generate UUID for the mobile app user
-        mobile_uuid = str(uuid_module.uuid4())
+        mobile_uuid = await register_mobile_app_user_api(
+            hisnumber_qms=hisnumber_qms,
+            hisnumber_infoclinica=hisnumber_infoclinica,
+            patient_repo=patient_repo
+        )
         
-        # Insert into mobile_app_users table
-        insert_query = """
-            INSERT INTO mobile_app_users (uuid, hisnumber_qms, hisnumber_infoclinica)
-            VALUES (%s, %s, %s)
-            RETURNING uuid
-        """
-        
-        params = (mobile_uuid, hisnumber_qms, hisnumber_infoclinica)
-        
-        logger.info(f"Registering mobile app user: UUID={mobile_uuid}, QMS={hisnumber_qms}, IC={hisnumber_infoclinica}")
-        
-        rows, columns = pg_connector.execute_query(insert_query, params)
-        
-        if rows and len(rows) > 0:
-            created_uuid = rows[0][0]
-            logger.info(f"Successfully registered mobile app user: {created_uuid}")
-            return str(created_uuid)
+        if mobile_uuid:
+            return {
+                "success": True,
+                "mobile_uuid": mobile_uuid,
+                "message": "Mobile app user registered successfully"
+            }
         else:
-            logger.error("Failed to register mobile app user: no UUID returned")
-            return None
-            
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to register mobile app user"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error registering mobile app user: {e}")
-        return None
+        logger.error(f"Error in manual mobile user registration: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
 
-# Update the check_modify_patient function to handle patient creation response and mobile app registration
-# Replace the existing patient creation logic in the else block with:
-
-async def create_his_patient(his_type: str, patient_data: PatientCredentialRequest) -> dict:
-    """
-    Create patient in specified HIS system via authenticated API call.
-    
-    Args:
-        his_type: 'yottadb' or 'firebird'
-        patient_data: Patient data for creation
-        
-    Returns:
-        Dict with success status and hisnumber if successful
-    """
+@app.post("/patient/{patient_uuid}/lock")
+async def lock_patient_matching(patient_uuid: str, reason: str = "Manual lock",
+                               patient_repo: PatientRepository = Depends(get_patient_repo)):
+    """Lock patient from further matching operations."""
     try:
-        # Step 1: Get OAuth token
-        access_token = await get_oauth_token(his_type)
-        if not access_token:
-            logger.error(f"Failed to obtain OAuth token for {his_type.upper()} patient creation")
-            return {"success": False, "error": "OAuth authentication failed"}
-        
-        # Step 2: Prepare API call
-        config = HIS_API_CONFIG[his_type]
-        url = config["base_url"] + config["create_endpoint"]
-        
-        # Prepare payload - same structure as input request
-        payload = {
-            "lastname": patient_data.lastname,
-            "firstname": patient_data.firstname,
-            "midname": patient_data.midname,
-            "bdate": patient_data.bdate,
-            "cllogin": patient_data.cllogin,
-            "clpassword": patient_data.clpassword
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        logger.info(f"Creating patient in {his_type.upper()}: {patient_data.lastname}, {patient_data.firstname}")
-        logger.debug(f"{his_type.upper()} create URL: {url}")
-        
-        # Step 3: Make authenticated API call
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            
-            if response.status_code == 201:
-                try:
-                    response_data = response.json()
-                    hisnumber = response_data.get("pcode")
-                    fullname = response_data.get("fullname", "")
-                    message = response_data.get("message", "Patient created successfully")
-                    
-                    logger.info(f"Successfully created patient in {his_type.upper()}: {fullname} (HIS#{hisnumber})")
-                    return {
-                        "success": True,
-                        "hisnumber": hisnumber,
-                        "fullname": fullname,
-                        "message": message
-                    }
-                except Exception as json_error:
-                    logger.warning(f"Failed to parse {his_type.upper()} response JSON, but creation was successful: {json_error}")
-                    return {"success": True, "message": "Patient created successfully"}
-                    
-            elif response.status_code == 401:
-                # Token might be expired, clear cache and retry once
-                cache_key = f"{his_type}_token"
-                cache_expiry_key = f"{his_type}_token_expiry"
-                if cache_key in oauth_tokens:
-                    del oauth_tokens[cache_key]
-                if cache_expiry_key in oauth_tokens:
-                    del oauth_tokens[cache_expiry_key]
-                
-                logger.warning(f"OAuth token expired for {his_type.upper()}, retrying patient creation with new token")
-                
-                # Get new token and retry
-                new_token = await get_oauth_token(his_type)
-                if new_token:
-                    headers["Authorization"] = f"Bearer {new_token}"
-                    retry_response = await client.post(url, json=payload, headers=headers)
-                    
-                    if retry_response.status_code == 201:
-                        try:
-                            retry_data = retry_response.json()
-                            hisnumber = retry_data.get("pcode")
-                            fullname = retry_data.get("fullname", "")
-                            message = retry_data.get("message", "Patient created successfully")
-                            
-                            logger.info(f"Successfully created patient in {his_type.upper()} (retry): {fullname} (HIS#{hisnumber})")
-                            return {
-                                "success": True,
-                                "hisnumber": hisnumber,
-                                "fullname": fullname,
-                                "message": message
-                            }
-                        except Exception as json_error:
-                            logger.warning(f"Failed to parse {his_type.upper()} retry response JSON, but creation was successful: {json_error}")
-                            return {"success": True, "message": "Patient created successfully (retry)"}
-                    else:
-                        logger.error(f"{his_type.upper()} patient creation failed on retry: {retry_response.status_code} - {retry_response.text}")
-                        return {"success": False, "error": f"Creation failed on retry: {retry_response.status_code}"}
-                else:
-                    logger.error(f"Failed to get new OAuth token for {his_type.upper()} patient creation retry")
-                    return {"success": False, "error": "Failed to refresh OAuth token"}
-            else:
-                logger.error(f"{his_type.upper()} patient creation failed: {response.status_code} - {response.text}")
-                return {"success": False, "error": f"Creation failed: {response.status_code} - {response.text}"}
-                
+        success = await patient_repo.lock_patient_matching(patient_uuid, reason)
+        if success:
+            return {
+                "success": True,
+                "message": f"Patient {patient_uuid} matching locked",
+                "reason": reason
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient not found"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error creating patient in {his_type.upper()}: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error locking patient matching: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.post("/patient/{patient_uuid}/unlock")
+async def unlock_patient_matching(patient_uuid: str,
+                                 patient_repo: PatientRepository = Depends(get_patient_repo)):
+    """Unlock patient matching operations."""
+    try:
+        success = await patient_repo.unlock_patient_matching(patient_uuid)
+        if success:
+            return {
+                "success": True,
+                "message": f"Patient {patient_uuid} matching unlocked"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unlocking patient matching: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.get("/")
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "name": API_CONFIG["title"],
+        "version": API_CONFIG["version"],
+        "description": API_CONFIG["description"],
+        "docs_url": "/docs",
+        "health_url": "/health",
+        "stats_url": "/stats",
+        "timestamp": datetime.now().isoformat()
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    config = get_api_config()
+    uvicorn.run(
+        app, 
+        host=config["api"]["host"], 
+        port=config["api"]["port"],
+        log_level="info"
+    )
