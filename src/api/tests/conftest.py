@@ -14,7 +14,8 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.
 sys.path.append(parent_dir)
 
 from fastapi.testclient import TestClient
-from src.api.main import app, pg_connector, oauth_tokens
+from src.api.main import app, oauth_tokens
+from src.api.database import db_pool, PatientRepository
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -64,7 +65,9 @@ def sample_patient_db_record():
         'hisnumber_qms': 'QMS123456',
         'hisnumber_infoclinica': 'IC789012',
         'login_qms': 'jsmith_login',
-        'login_infoclinica': None
+        'login_infoclinica': None,
+        'registered_via_mobile': False,
+        'matching_locked': False
     }
 
 @pytest.fixture
@@ -79,7 +82,9 @@ def sample_patient_db_record_partial():
         'hisnumber_qms': 'QMS789012',
         'hisnumber_infoclinica': None,
         'login_qms': 'jdoe_login',
-        'login_infoclinica': None
+        'login_infoclinica': None,
+        'registered_via_mobile': False,
+        'matching_locked': False
     }
 
 @pytest.fixture
@@ -93,13 +98,26 @@ def mock_oauth_token_response():
     }
 
 @pytest.fixture
-def mock_pg_connector():
-    """Mock PostgreSQL connector."""
-    mock_connector = Mock()
-    mock_connector.connection = True
-    mock_connector.connect.return_value = True
-    mock_connector.disconnect.return_value = None
-    return mock_connector
+def mock_db_pool():
+    """Mock database pool."""
+    mock_pool = Mock()
+    mock_pool.execute_query = AsyncMock()
+    mock_pool.execute_insert = AsyncMock()
+    mock_pool.execute_update = AsyncMock()
+    mock_pool.check_health = AsyncMock(return_value=True)
+    return mock_pool
+
+@pytest.fixture
+def mock_patient_repo():
+    """Mock patient repository."""
+    mock_repo = Mock(spec=PatientRepository)
+    mock_repo.find_patient_by_credentials = AsyncMock()
+    mock_repo.register_mobile_app_user = AsyncMock()
+    mock_repo.get_mobile_app_stats = AsyncMock()
+    mock_repo.get_patient_matching_stats = AsyncMock()
+    mock_repo.lock_patient_matching = AsyncMock()
+    mock_repo.unlock_patient_matching = AsyncMock()
+    return mock_repo
 
 @pytest.fixture(autouse=True)
 def clear_oauth_cache():
@@ -124,6 +142,14 @@ def mock_environment():
         "FIREBIRD_CLIENT_SECRET": "test_firebird_secret",
         "FIREBIRD_USERNAME": "test_firebird_user",
         "FIREBIRD_PASSWORD": "test_firebird_pass",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "test_medical_system",
+        "POSTGRES_USER": "test_user",
+        "POSTGRES_PASSWORD": "test_password",
+        "MOBILE_APP_REGISTRATION_ENABLED": "true",
+        "MOBILE_APP_AUTO_REGISTER": "true",
+        "MOBILE_APP_REQUIRE_BOTH_HIS": "false"
     }
     
     with patch.dict(os.environ, env_vars):
@@ -143,3 +169,55 @@ class MockAsyncResponse:
 def mock_httpx_client():
     """Mock httpx async client."""
     return AsyncMock()
+
+@pytest.fixture(autouse=True)
+def mock_database_initialization():
+    """Mock database initialization for all tests."""
+    with patch('src.api.main.initialize_database', return_value=True), \
+         patch('src.api.main.close_database'), \
+         patch('src.api.main.get_database_health', return_value={"status": "healthy", "database": "test_db"}):
+        yield
+
+@pytest.fixture
+def mock_patient_repo_dependency():
+    """Mock the patient repository dependency."""
+    def _mock_get_patient_repo():
+        mock_repo = Mock(spec=PatientRepository)
+        mock_repo.find_patient_by_credentials = AsyncMock()
+        mock_repo.register_mobile_app_user = AsyncMock()
+        mock_repo.get_mobile_app_stats = AsyncMock(return_value={
+            "total_mobile_users": 10,
+            "both_his_registered": 5,
+            "qms_only": 3,
+            "infoclinica_only": 2
+        })
+        mock_repo.get_patient_matching_stats = AsyncMock(return_value=[
+            {"match_type": "NEW_WITH_DOCUMENT", "count": 10, "new_patients_created": 10, "mobile_app_matches": 0},
+            {"match_type": "MOBILE_APP_NEW", "count": 5, "new_patients_created": 5, "mobile_app_matches": 5}
+        ])
+        mock_repo.lock_patient_matching = AsyncMock(return_value=True)
+        mock_repo.unlock_patient_matching = AsyncMock(return_value=True)
+        return mock_repo
+    
+    with patch('src.api.main.get_patient_repo', side_effect=_mock_get_patient_repo):
+        yield
+
+# Helper functions for tests
+def create_mock_patient_creation_response(success=True, hisnumber="TEST123"):
+    """Create a mock patient creation response."""
+    if success:
+        return {
+            "success": True,
+            "hisnumber": hisnumber,
+            "fullname": "Test Patient",
+            "message": "Patient created successfully"
+        }
+    else:
+        return {
+            "success": False,
+            "error": "Creation failed"
+        }
+
+def create_mock_database_result(data_list):
+    """Create a mock database result from a list of dictionaries."""
+    return data_list

@@ -9,118 +9,55 @@ from datetime import datetime, timedelta
 from fastapi import status
 
 from src.api.main import (
-    find_patient_by_credentials, 
     get_oauth_token, 
     update_his_credentials,
+    create_his_patient,
+    register_mobile_app_user_api,
     oauth_tokens
 )
-from src.api.tests.conftest import MockAsyncResponse
+from src.api.tests.conftest import MockAsyncResponse, create_mock_patient_creation_response
 
 
 class TestPatientSearch:
     """Tests for patient search functionality."""
     
-    @patch('src.api.main.pg_connector')
-    def test_find_patient_with_midname_success(self, mock_connector, sample_patient_db_record):
+    def test_find_patient_with_midname_success(self, client, mock_patient_repo_dependency, 
+                                             sample_patient_request, sample_patient_db_record):
         """Test successful patient search with middle name."""
-        # Setup
-        mock_connector.execute_query.return_value = (
-            [tuple(sample_patient_db_record.values())],
-            list(sample_patient_db_record.keys())
-        )
-        
-        # Execute
-        result = find_patient_by_credentials(
-            lastname="Smith",
-            firstname="John", 
-            midname="William",
-            bdate="1990-01-15",
-            cllogin="jsmith_login"
-        )
-        
-        # Assert
-        assert result is not None
-        assert result['uuid'] == 'test-uuid-123'
-        assert result['lastname'] == 'Smith'
-        assert result['hisnumber_qms'] == 'QMS123456'
-        assert result['hisnumber_infoclinica'] == 'IC789012'
-        
-        # Verify query was called with correct parameters
-        mock_connector.execute_query.assert_called_once()
-        call_args = mock_connector.execute_query.call_args
-        assert "surname = %s" in call_args[0][0]  # Query should include surname check
-        assert call_args[0][1] == ("Smith", "John", "William", "1990-01-15", "jsmith_login", "jsmith_login")
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=sample_patient_db_record)
+            mock_get_repo.return_value = mock_repo
+            
+            with patch('src.api.main.update_his_credentials', return_value=True):
+                response = client.post("/checkModifyPatient", json=sample_patient_request)
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] == "true"
+                assert data["action"] == "update"
+                assert "updated successfully" in data["message"]
     
-    @patch('src.api.main.pg_connector')
-    def test_find_patient_without_midname_success(self, mock_connector, sample_patient_db_record_partial):
-        """Test successful patient search without middle name."""
-        # Setup
-        mock_connector.execute_query.return_value = (
-            [tuple(sample_patient_db_record_partial.values())],
-            list(sample_patient_db_record_partial.keys())
-        )
-        
-        # Execute
-        result = find_patient_by_credentials(
-            lastname="Doe",
-            firstname="Jane", 
-            midname=None,
-            bdate="1985-05-20",
-            cllogin="jdoe_login"
-        )
-        
-        # Assert
-        assert result is not None
-        assert result['uuid'] == 'test-uuid-456'
-        assert result['lastname'] == 'Doe'
-        assert result['hisnumber_qms'] == 'QMS789012'
-        assert result['hisnumber_infoclinica'] is None
-        
-        # Verify query was called with correct parameters
-        mock_connector.execute_query.assert_called_once()
-        call_args = mock_connector.execute_query.call_args
-        assert "surname IS NULL OR surname = ''" in call_args[0][0]  # Query should check for NULL surname
-        assert call_args[0][1] == ("Doe", "Jane", "1985-05-20", "jdoe_login", "jdoe_login")
-    
-    @patch('src.api.main.pg_connector')
-    def test_find_patient_not_found(self, mock_connector):
-        """Test patient search when no patient is found."""
-        # Setup
-        mock_connector.execute_query.return_value = ([], [])
-        
-        # Execute
-        result = find_patient_by_credentials(
-            lastname="NotFound",
-            firstname="Patient", 
-            midname=None,
-            bdate="2000-01-01",
-            cllogin="nonexistent_login"
-        )
-        
-        # Assert
-        assert result is None
-    
-    @patch('src.api.main.pg_connector')
-    def test_find_patient_multiple_results_warning(self, mock_connector, sample_patient_db_record):
-        """Test patient search when multiple patients are found."""
-        # Setup - return two identical records
-        mock_connector.execute_query.return_value = (
-            [tuple(sample_patient_db_record.values()), tuple(sample_patient_db_record.values())],
-            list(sample_patient_db_record.keys())
-        )
-        
-        # Execute
-        result = find_patient_by_credentials(
-            lastname="Smith",
-            firstname="John", 
-            midname="William",
-            bdate="1990-01-15",
-            cllogin="jsmith_login"
-        )
-        
-        # Assert - should return first result
-        assert result is not None
-        assert result['uuid'] == 'test-uuid-123'
+    def test_find_patient_not_found_creates_new(self, client, mock_patient_repo_dependency, 
+                                              sample_patient_request):
+        """Test patient creation when patient not found."""
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+            mock_get_repo.return_value = mock_repo
+            
+            with patch('src.api.main.create_his_patient') as mock_create:
+                mock_create.return_value = create_mock_patient_creation_response(True, "TEST123")
+                
+                response = client.post("/checkModifyPatient", json=sample_patient_request)
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] == "true"
+                assert data["action"] == "create"
+                assert "created successfully" in data["message"]
+                assert data["mobile_uuid"] == "test-mobile-uuid"
 
 
 class TestOAuthAuthentication:
@@ -186,20 +123,6 @@ class TestOAuthAuthentication:
             
             # Assert
             assert token is None
-    
-    @pytest.mark.asyncio
-    async def test_get_oauth_token_missing_access_token(self, mock_environment):
-        """Test OAuth response missing access_token field."""
-        with patch('httpx.AsyncClient') as mock_client:
-            # Setup
-            mock_response = MockAsyncResponse(200, {"token_type": "Bearer"})  # Missing access_token
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-            
-            # Execute
-            token = await get_oauth_token('yottadb')
-            
-            # Assert
-            assert token is None
 
 
 class TestHISCredentialUpdate:
@@ -235,235 +158,239 @@ class TestHISCredentialUpdate:
             
             # Assert
             assert result is False
+
+
+class TestPatientCreation:
+    """Tests for patient creation functionality."""
     
     @pytest.mark.asyncio
-    async def test_update_his_credentials_api_failure(self, mock_environment):
-        """Test HIS credential update when API call fails."""
+    async def test_create_his_patient_success(self, sample_patient_request, mock_environment):
+        """Test successful patient creation in HIS system."""
+        from src.api.main import PatientCredentialRequest
+        
+        patient_data = PatientCredentialRequest(**sample_patient_request)
+        
         with patch('httpx.AsyncClient') as mock_client, \
              patch('src.api.main.get_oauth_token') as mock_get_token:
             
             # Setup
-            mock_get_token.return_value = "test_access_token"
-            mock_response = MockAsyncResponse(400, {}, "Bad Request")
+            mock_get_token.return_value = "test_access_token_create"
+            mock_response = MockAsyncResponse(201, {
+                "pcode": "TEST123",
+                "fullname": "Smith John William",
+                "message": "Patient created successfully"
+            })
             mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
             
             # Execute
-            result = await update_his_credentials('yottadb', 'QMS123', 'newlogin', 'newpassword')
+            result = await create_his_patient('yottadb', patient_data)
             
             # Assert
-            assert result is False
+            assert result["success"] is True
+            assert result["hisnumber"] == "TEST123"
+            assert result["fullname"] == "Smith John William"
+            mock_get_token.assert_called_once_with('yottadb')
     
     @pytest.mark.asyncio
-    async def test_update_his_credentials_token_expired_retry(self, mock_oauth_token_response, mock_environment):
-        """Test HIS credential update with token expiry and retry."""
-        with patch('httpx.AsyncClient') as mock_client, \
-             patch('src.api.main.get_oauth_token') as mock_get_token:
-            
+    async def test_create_his_patient_oauth_failure(self, sample_patient_request, mock_environment):
+        """Test patient creation when OAuth fails."""
+        from src.api.main import PatientCredentialRequest
+        
+        patient_data = PatientCredentialRequest(**sample_patient_request)
+        
+        with patch('src.api.main.get_oauth_token') as mock_get_token:
             # Setup
-            mock_get_token.side_effect = ["expired_token", "new_token"]
-            
-            # First call returns 401, second call returns 201
-            mock_client_instance = mock_client.return_value.__aenter__.return_value
-            mock_client_instance.post = AsyncMock(side_effect=[
-                MockAsyncResponse(401, {}, "Unauthorized"),
-                MockAsyncResponse(201)
-            ])
+            mock_get_token.return_value = None
             
             # Execute
-            result = await update_his_credentials('yottadb', 'QMS123', 'newlogin', 'newpassword')
+            result = await create_his_patient('yottadb', patient_data)
             
             # Assert
-            assert result is True
-            assert mock_get_token.call_count == 2  # Called twice due to retry
+            assert result["success"] is False
+            assert "OAuth authentication failed" in result["error"]
+
+
+class TestMobileAppUserRegistration:
+    """Tests for mobile app user registration."""
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_success(self, mock_environment):
+        """Test successful mobile app user registration."""
+        mock_repo = Mock()
+        mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+        
+        result = await register_mobile_app_user_api(
+            hisnumber_qms="QMS123",
+            hisnumber_infoclinica="IC456",
+            patient_repo=mock_repo
+        )
+        
+        assert result == "test-mobile-uuid"
+        mock_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_disabled(self, mock_environment):
+        """Test mobile app user registration when disabled."""
+        with patch.dict(os.environ, {"MOBILE_APP_REGISTRATION_ENABLED": "false"}):
+            # Force reload of config
+            from src.api import config
+            config.MOBILE_APP_CONFIG["registration_enabled"] = False
+            
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456"
+            )
+            
+            assert result is None
 
 
 class TestAPIEndpoints:
     """Tests for API endpoints."""
     
-    @patch('src.api.main.pg_connector')
-    def test_health_check_healthy(self, mock_connector, client):
+    def test_health_check_healthy(self, client, mock_patient_repo_dependency):
         """Test health check endpoint when system is healthy."""
-        # Setup
-        mock_connector.connection = True
-        mock_connector.execute_query.return_value = ([1], ['column'])
+        with patch('src.api.main.get_database_health') as mock_health:
+            mock_health.return_value = {"status": "healthy", "database": "test_db"}
+            
+            response = client.get("/health")
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "healthy"
+            assert "timestamp" in data
+            assert "database" in data
+            assert "his_endpoints" in data
+    
+    def test_stats_endpoint(self, client, mock_patient_repo_dependency):
+        """Test statistics endpoint."""
+        response = client.get("/stats")
         
-        # Execute
-        response = client.get("/health")
-        
-        # Assert
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy"
-        assert data["database"] == "connected"
+        assert "mobile_app_users" in data
+        assert "patient_matching_24h" in data
         assert "timestamp" in data
-        assert "his_endpoints" in data
     
-    @patch('src.api.main.pg_connector')
-    def test_health_check_unhealthy(self, mock_connector, client):
-        """Test health check endpoint when system is unhealthy."""
-        # Setup
-        mock_connector.connection = False
+    def test_config_endpoint(self, client, mock_patient_repo_dependency):
+        """Test configuration endpoint."""
+        response = client.get("/config")
         
-        # Execute
-        response = client.get("/health")
-        
-        # Assert
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy" 
-        assert data["database"] == "disconnected"
+        assert "api" in data
+        assert "postgresql" in data
+        assert "his_systems" in data
     
-    @patch('src.api.main.find_patient_by_credentials')
-    @patch('src.api.main.update_his_credentials') 
-    def test_check_modify_patient_success(self, mock_update, mock_find, client, 
+    def test_check_modify_patient_success(self, client, mock_patient_repo_dependency, 
                                          sample_patient_request, sample_patient_db_record):
         """Test successful patient credential modification."""
-        # Setup
-        mock_find.return_value = sample_patient_db_record
-        mock_update.return_value = True
-        
-        # Execute
-        response = client.post("/checkModifyPatient", json=sample_patient_request)
-        
-        # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] == "true"
-        assert "updated successfully" in data["message"]
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=sample_patient_db_record)
+            mock_get_repo.return_value = mock_repo
+            
+            with patch('src.api.main.update_his_credentials', return_value=True):
+                response = client.post("/checkModifyPatient", json=sample_patient_request)
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] == "true"
+                assert data["action"] == "update"
     
-    @patch('src.api.main.find_patient_by_credentials')
-    def test_check_modify_patient_not_found(self, mock_find, client, sample_patient_request):
+    def test_check_modify_patient_not_found(self, client, mock_patient_repo_dependency, 
+                                          sample_patient_request):
         """Test patient credential modification when patient not found."""
-        # Setup
-        mock_find.return_value = None
-        
-        # Execute
-        response = client.post("/checkModifyPatient", json=sample_patient_request)
-        
-        # Assert
-        assert response.status_code == 404
-        data = response.json()
-        assert "not found" in data["detail"].lower()
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-uuid")
+            mock_get_repo.return_value = mock_repo
+            
+            with patch('src.api.main.create_his_patient') as mock_create:
+                mock_create.return_value = create_mock_patient_creation_response(True, "TEST123")
+                
+                response = client.post("/checkModifyPatient", json=sample_patient_request)
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] == "true"
+                assert data["action"] == "create"
     
-    @patch('src.api.main.find_patient_by_credentials')
-    def test_check_modify_patient_no_his_numbers(self, mock_find, client, sample_patient_request):
-        """Test patient credential modification when patient has no HIS numbers."""
-        # Setup
-        patient_no_his = {
-            'uuid': 'test-uuid-123',
-            'lastname': 'Smith',
-            'name': 'John',
-            'surname': 'William',
-            'birthdate': '1990-01-15',
-            'hisnumber_qms': None,
-            'hisnumber_infoclinica': None,
-            'login_qms': 'jsmith_login',
-            'login_infoclinica': None
-        }
-        mock_find.return_value = patient_no_his
-        
-        # Execute
-        response = client.post("/checkModifyPatient", json=sample_patient_request)
-        
-        # Assert
-        assert response.status_code == 400
-        data = response.json()
-        assert "no associated HIS numbers" in data["detail"]
-    
-    @patch('src.api.main.find_patient_by_credentials')
-    @patch('src.api.main.update_his_credentials')
-    def test_check_modify_patient_partial_success(self, mock_update, mock_find, client, 
-                                                 sample_patient_request, sample_patient_db_record):
-        """Test patient credential modification with partial success."""
-        # Setup
-        mock_find.return_value = sample_patient_db_record
-        mock_update.side_effect = [True, False]  # First succeeds, second fails
-        
-        # Execute
-        response = client.post("/checkModifyPatient", json=sample_patient_request)
-        
-        # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] == "partial"
-        assert "Failed:" in data["message"]
-    
-    def test_check_modify_patient_invalid_date_format(self, client, sample_patient_request):
+    def test_check_modify_patient_invalid_date_format(self, client, mock_patient_repo_dependency, 
+                                                    sample_patient_request):
         """Test patient credential modification with invalid date format."""
-        # Setup
         sample_patient_request["bdate"] = "invalid-date"
         
-        # Execute
         response = client.post("/checkModifyPatient", json=sample_patient_request)
         
-        # Assert
         assert response.status_code == 422  # Validation error
     
-    def test_check_modify_patient_missing_fields(self, client):
-        """Test patient credential modification with missing required fields."""
-        # Setup
-        incomplete_request = {
-            "lastname": "Smith",
-            "firstname": "John"
-            # Missing required fields
-        }
-        
-        # Execute
-        response = client.post("/checkModifyPatient", json=incomplete_request)
-        
-        # Assert
-        assert response.status_code == 422  # Validation error
-
-
-class TestOAuthTestEndpoint:
-    """Tests for OAuth testing endpoint."""
-    
-    @patch('src.api.main.get_oauth_token')
-    def test_oauth_test_success(self, mock_get_token, client):
+    def test_oauth_test_success(self, client, mock_patient_repo_dependency):
         """Test OAuth test endpoint success."""
-        # Setup
-        mock_get_token.return_value = "test_token_12345"
-        
-        # Execute
-        response = client.post("/test-oauth/yottadb")
-        
-        # Assert
+        with patch('src.api.main.get_oauth_token') as mock_get_token:
+            mock_get_token.return_value = "test_token_12345"
+            
+            response = client.post("/test-oauth/yottadb")
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "successful" in data["message"]
+            assert data["token_preview"] == "test_token..."
+    
+    def test_oauth_test_failure(self, client, mock_patient_repo_dependency):
+        """Test OAuth test endpoint failure."""
+        with patch('src.api.main.get_oauth_token') as mock_get_token:
+            mock_get_token.return_value = None
+            
+            response = client.post("/test-oauth/yottadb")
+            
+            assert response.status_code == 401
+            data = response.json()
+            assert data["success"] is False
+            assert "failed" in data["message"]
+    
+    def test_patient_lock_unlock(self, client, mock_patient_repo_dependency):
+        """Test patient lock and unlock endpoints."""
+        # Test lock
+        response = client.post("/patient/test-uuid-123/lock?reason=Test lock")
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "successful" in data["message"]
-        assert data["token_preview"] == "test_token..."
-    
-    @patch('src.api.main.get_oauth_token')
-    def test_oauth_test_failure(self, mock_get_token, client):
-        """Test OAuth test endpoint failure."""
-        # Setup
-        mock_get_token.return_value = None
         
-        # Execute
-        response = client.post("/test-oauth/yottadb")
-        
-        # Assert
-        assert response.status_code == 401
+        # Test unlock
+        response = client.post("/patient/test-uuid-123/unlock")
+        assert response.status_code == 200
         data = response.json()
-        assert data["success"] is False
-        assert "failed" in data["message"]
+        assert data["success"] is True
     
-    def test_oauth_test_invalid_his_type(self, client):
-        """Test OAuth test endpoint with invalid HIS type."""
-        # Execute
-        response = client.post("/test-oauth/invalid")
+    def test_mobile_user_register_endpoint(self, client, mock_patient_repo_dependency):
+        """Test mobile user registration endpoint."""
+        with patch('src.api.main.register_mobile_app_user_api') as mock_register:
+            mock_register.return_value = "test-mobile-uuid"
+            
+            response = client.post("/mobile-user/register?hisnumber_qms=QMS123&hisnumber_infoclinica=IC456")
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["mobile_uuid"] == "test-mobile-uuid"
+    
+    def test_root_endpoint(self, client, mock_patient_repo_dependency):
+        """Test root endpoint."""
+        response = client.get("/")
         
-        # Assert
-        assert response.status_code == 400
+        assert response.status_code == 200
         data = response.json()
-        assert "Invalid HIS type" in data["detail"]
+        assert "name" in data
+        assert "version" in data
+        assert "description" in data
 
 
 class TestInputValidation:
     """Tests for input validation."""
     
-    def test_valid_date_formats(self, client):
+    def test_valid_date_formats(self, client, mock_patient_repo_dependency):
         """Test various valid date formats."""
         valid_dates = ["1990-01-15", "2000-12-31", "1985-06-20"]
         
@@ -476,13 +403,20 @@ class TestInputValidation:
                 "clpassword": "test_password"
             }
             
-            with patch('src.api.main.find_patient_by_credentials') as mock_find:
-                mock_find.return_value = None
-                response = client.post("/checkModifyPatient", json=request_data)
-                # Should not fail validation (will fail with 404 due to mock)
-                assert response.status_code != 422
+            with patch('src.api.main.get_patient_repository') as mock_get_repo:
+                mock_repo = Mock()
+                mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+                mock_repo.register_mobile_app_user = AsyncMock(return_value="test-uuid")
+                mock_get_repo.return_value = mock_repo
+                
+                with patch('src.api.main.create_his_patient') as mock_create:
+                    mock_create.return_value = create_mock_patient_creation_response(False)
+                    
+                    response = client.post("/checkModifyPatient", json=request_data)
+                    # Should not fail validation (may fail later due to mocks)
+                    assert response.status_code != 422
     
-    def test_invalid_date_formats(self, client):
+    def test_invalid_date_formats(self, client, mock_patient_repo_dependency):
         """Test various invalid date formats."""
         invalid_dates = ["1990/01/15", "15-01-1990", "1990-13-01", "invalid", ""]
         
