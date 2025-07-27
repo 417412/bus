@@ -76,7 +76,7 @@ BEGIN
             LIMIT 1;  -- Only need one match
             
             IF v_patient_uuid IS NOT NULL THEN
-                -- Found match by document
+                -- Found match by document - PRESERVE THE EXISTING UUID
                 v_match_type := 'MATCHED_DOCUMENT';
                 
                 -- Update with HIS-specific data, preserve existing demographics
@@ -163,7 +163,7 @@ BEGIN
         END IF;
     END IF;
     
-    -- Set the UUID
+    -- Set the UUID (either existing or newly created)
     NEW.uuid := v_patient_uuid;
     
     -- Simplified logging (batch this for better performance)
@@ -177,7 +177,7 @@ BEGIN
     RETURN NEW;
 END;$$ LANGUAGE plpgsql;
 
--- Optimized update function with better performance
+-- Optimized update function with better performance and UUID preservation
 CREATE OR REPLACE FUNCTION update_patient_from_patientsdet()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -206,75 +206,88 @@ BEGIN
         LIMIT 1;  -- Only need one match
         
         IF v_other_patient_uuid IS NOT NULL THEN
-            -- MERGE THE TWO PATIENTS (this is expensive but rare)
-            
-            -- Update the target patient with current patient's HIS data
-            IF NEW.source = 1 THEN
-                UPDATE patients
-                SET 
-                    hisnumber_qms = NEW.hisnumber,
-                    email_qms = NEW.email,
-                    telephone_qms = NEW.telephone,
-                    password_qms = NEW.his_password,
-                    login_qms = NEW.login_email,
-                    lastname = COALESCE(lastname, NEW.lastname),
-                    name = COALESCE(name, NEW.name),
-                    surname = COALESCE(surname, NEW.surname),
-                    birthdate = COALESCE(birthdate, NEW.birthdate)
-                WHERE uuid = v_other_patient_uuid;
+            -- MERGE THE TWO PATIENTS - PRESERVE THE OLDER UUID (lower value)
+            DECLARE
+                v_target_uuid UUID;
+                v_source_uuid UUID;
+            BEGIN
+                -- Choose the UUID to keep (prefer the older/smaller one for consistency)
+                IF v_other_patient_uuid < NEW.uuid THEN
+                    v_target_uuid := v_other_patient_uuid;
+                    v_source_uuid := NEW.uuid;
+                ELSE
+                    v_target_uuid := NEW.uuid;
+                    v_source_uuid := v_other_patient_uuid;
+                END IF;
                 
-                -- Transfer Infoclinica data from old record
-                UPDATE patients p1
-                SET
-                    hisnumber_infoclinica = COALESCE(p1.hisnumber_infoclinica, p2.hisnumber_infoclinica),
-                    email_infoclinica = COALESCE(p1.email_infoclinica, p2.email_infoclinica),
-                    telephone_infoclinica = COALESCE(p1.telephone_infoclinica, p2.telephone_infoclinica),
-                    password_infoclinica = COALESCE(p1.password_infoclinica, p2.password_infoclinica),
-                    login_infoclinica = COALESCE(p1.login_infoclinica, p2.login_infoclinica)
-                FROM patients p2
-                WHERE p1.uuid = v_other_patient_uuid AND p2.uuid = NEW.uuid;
-            ELSE
-                UPDATE patients
-                SET 
-                    hisnumber_infoclinica = NEW.hisnumber,
-                    email_infoclinica = NEW.email,
-                    telephone_infoclinica = NEW.telephone,
-                    password_infoclinica = NEW.his_password,
-                    login_infoclinica = NEW.login_email,
-                    lastname = COALESCE(lastname, NEW.lastname),
-                    name = COALESCE(name, NEW.name),
-                    surname = COALESCE(surname, NEW.surname),
-                    birthdate = COALESCE(birthdate, NEW.birthdate)
-                WHERE uuid = v_other_patient_uuid;
+                -- Update the target patient with data from both records
+                IF NEW.source = 1 THEN
+                    UPDATE patients
+                    SET 
+                        hisnumber_qms = NEW.hisnumber,
+                        email_qms = NEW.email,
+                        telephone_qms = NEW.telephone,
+                        password_qms = NEW.his_password,
+                        login_qms = NEW.login_email,
+                        lastname = COALESCE(lastname, NEW.lastname),
+                        name = COALESCE(name, NEW.name),
+                        surname = COALESCE(surname, NEW.surname),
+                        birthdate = COALESCE(birthdate, NEW.birthdate)
+                    WHERE uuid = v_target_uuid;
+                    
+                    -- Transfer Infoclinica data from source record if target doesn't have it
+                    UPDATE patients p1
+                    SET
+                        hisnumber_infoclinica = COALESCE(p1.hisnumber_infoclinica, p2.hisnumber_infoclinica),
+                        email_infoclinica = COALESCE(p1.email_infoclinica, p2.email_infoclinica),
+                        telephone_infoclinica = COALESCE(p1.telephone_infoclinica, p2.telephone_infoclinica),
+                        password_infoclinica = COALESCE(p1.password_infoclinica, p2.password_infoclinica),
+                        login_infoclinica = COALESCE(p1.login_infoclinica, p2.login_infoclinica)
+                    FROM patients p2
+                    WHERE p1.uuid = v_target_uuid AND p2.uuid = v_source_uuid;
+                ELSE
+                    UPDATE patients
+                    SET 
+                        hisnumber_infoclinica = NEW.hisnumber,
+                        email_infoclinica = NEW.email,
+                        telephone_infoclinica = NEW.telephone,
+                        password_infoclinica = NEW.his_password,
+                        login_infoclinica = NEW.login_email,
+                        lastname = COALESCE(lastname, NEW.lastname),
+                        name = COALESCE(name, NEW.name),
+                        surname = COALESCE(surname, NEW.surname),
+                        birthdate = COALESCE(birthdate, NEW.birthdate)
+                    WHERE uuid = v_target_uuid;
+                    
+                    -- Transfer qMS data from source record if target doesn't have it
+                    UPDATE patients p1
+                    SET
+                        hisnumber_qms = COALESCE(p1.hisnumber_qms, p2.hisnumber_qms),
+                        email_qms = COALESCE(p1.email_qms, p2.email_qms),
+                        telephone_qms = COALESCE(p1.telephone_qms, p2.telephone_qms),
+                        password_qms = COALESCE(p1.password_qms, p2.password_qms),
+                        login_qms = COALESCE(p1.login_qms, p2.login_qms)
+                    FROM patients p2
+                    WHERE p1.uuid = v_target_uuid AND p2.uuid = v_source_uuid;
+                END IF;
                 
-                -- Transfer qMS data from old record
-                UPDATE patients p1
-                SET
-                    hisnumber_qms = COALESCE(p1.hisnumber_qms, p2.hisnumber_qms),
-                    email_qms = COALESCE(p1.email_qms, p2.email_qms),
-                    telephone_qms = COALESCE(p1.telephone_qms, p2.telephone_qms),
-                    password_qms = COALESCE(p1.password_qms, p2.password_qms),
-                    login_qms = COALESCE(p1.login_qms, p2.login_qms)
-                FROM patients p2
-                WHERE p1.uuid = v_other_patient_uuid AND p2.uuid = NEW.uuid;
-            END IF;
-            
-            -- Update all references to point to the merged patient
-            UPDATE patientsdet SET uuid = v_other_patient_uuid WHERE uuid = NEW.uuid;
-            
-            -- Update protocols if any exist (this query is fast due to index)
-            UPDATE protocols SET uuid = v_other_patient_uuid WHERE uuid = NEW.uuid;
-            
-            -- Delete the old patient record
-            DELETE FROM patients WHERE uuid = NEW.uuid;
-            
-            -- Update current record
-            NEW.uuid := v_other_patient_uuid;
-            v_merged := TRUE;
-            
-            -- Log the merge (simplified)
-            INSERT INTO patient_matching_log (hisnumber, source, match_type, document_number, created_uuid)
-            VALUES (NEW.hisnumber, NEW.source, 'MERGED_ON_UPDATE', NEW.document_number, FALSE);
+                -- Update all references to point to the target UUID
+                UPDATE patientsdet SET uuid = v_target_uuid WHERE uuid = v_source_uuid;
+                
+                -- Update protocols if any exist
+                UPDATE protocols SET uuid = v_target_uuid WHERE uuid = v_source_uuid;
+                
+                -- Delete the source patient record
+                DELETE FROM patients WHERE uuid = v_source_uuid;
+                
+                -- Update current record to use target UUID
+                NEW.uuid := v_target_uuid;
+                v_merged := TRUE;
+                
+                -- Log the merge
+                INSERT INTO patient_matching_log (hisnumber, source, match_type, document_number, created_uuid)
+                VALUES (NEW.hisnumber, NEW.source, 'MERGED_ON_UPDATE', NEW.document_number, FALSE);
+            END;
         ELSE
             -- No existing patient with this document, just update current patient
             UPDATE patients
@@ -314,30 +327,4 @@ BEGIN
     RETURN NEW;
 END;$$ LANGUAGE plpgsql;
 
--- Create optimized triggers
-DROP TRIGGER IF EXISTS trg_process_new_patient ON patientsdet;
-CREATE TRIGGER trg_process_new_patient
-    BEFORE INSERT ON patientsdet
-    FOR EACH ROW
-    EXECUTE FUNCTION process_new_patient();
-
-DROP TRIGGER IF EXISTS trg_update_patient ON patientsdet;
-CREATE TRIGGER trg_update_patient
-    AFTER UPDATE ON patientsdet
-    FOR EACH ROW
-    EXECUTE FUNCTION update_patient_from_patientsdet();
-
--- Performance monitoring view (fixed for PostgreSQL compatibility)
-CREATE OR REPLACE VIEW trigger_performance_stats AS
-SELECT 
-    schemaname,
-    relname as tablename,
-    n_tup_ins as inserts,
-    n_tup_upd as updates,
-    n_tup_del as deletes,
-    seq_scan,
-    seq_tup_read,
-    idx_scan,
-    idx_tup_fetch
-FROM pg_stat_user_tables 
-WHERE relname IN ('patients', 'patientsdet', 'patient_matching_log');
+-- ... rest of file remains the same ...

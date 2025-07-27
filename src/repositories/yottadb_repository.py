@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from src.connectors.yottadb_connector import YottaDBConnector
 from datetime import datetime
 from src.config.settings import setup_logger, STATE_DIR
@@ -164,16 +164,69 @@ class YottaDBRepository:
         
         return self._all_patients_cache
     
+    def get_processed_hisnumbers(self) -> Set[str]:
+        """
+        Get set of all hisnumbers that have been processed from state file.
+        
+        Returns:
+            Set of processed hisnumbers
+        """
+        try:
+            file_path = os.path.join(self.state_dir, "yottadb_processed_hisnumbers.txt")
+            if not os.path.exists(file_path):
+                return set()
+                
+            with open(file_path, "r") as f:
+                hisnumbers = set()
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        hisnumbers.add(line)
+                return hisnumbers
+        except Exception as e:
+            self.logger.error(f"Error reading processed hisnumbers: {str(e)}")
+            return set()
+    
+    def save_processed_hisnumbers(self, hisnumbers: Set[str]) -> None:
+        """
+        Save set of processed hisnumbers to state file.
+        
+        Args:
+            hisnumbers: Set of hisnumbers to save
+        """
+        try:
+            file_path = os.path.join(self.state_dir, "yottadb_processed_hisnumbers.txt")
+            with open(file_path, "w") as f:
+                for hisnumber in sorted(hisnumbers):
+                    f.write(f"{hisnumber}\n")
+            self.logger.debug(f"Saved {len(hisnumbers)} processed hisnumbers")
+        except Exception as e:
+            self.logger.error(f"Error saving processed hisnumbers: {str(e)}")
+    
+    def add_processed_hisnumber(self, hisnumber: str) -> None:
+        """
+        Add a single hisnumber to the processed set.
+        
+        Args:
+            hisnumber: HIS number to mark as processed
+        """
+        try:
+            processed = self.get_processed_hisnumbers()
+            processed.add(hisnumber)
+            self.save_processed_hisnumbers(processed)
+        except Exception as e:
+            self.logger.error(f"Error adding processed hisnumber {hisnumber}: {str(e)}")
+    
     def get_patients(self, batch_size: int = 100, last_id: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch patient data from YottaDB API with batch processing simulation.
+        Fetch patient data from YottaDB API, returning only unprocessed patients.
         
         Args:
             batch_size: Maximum number of patients to fetch
-            last_id: ID of the last processed patient
+            last_id: Ignored for this implementation
             
         Returns:
-            List of dictionaries with patient data
+            List of dictionaries with unprocessed patient data
         """
         try:
             # Get all patients from API (cached)
@@ -182,25 +235,28 @@ class YottaDBRepository:
             if not all_patients:
                 return []
             
-            # Sort patients by hisnumber for consistent ordering
-            all_patients.sort(key=lambda x: x.get('hisnumber', ''))
+            # Get set of already processed hisnumbers
+            processed_hisnumbers = self.get_processed_hisnumbers()
             
-            # Find starting position based on last_id
-            start_index = 0
-            if last_id:
-                for i, patient in enumerate(all_patients):
-                    if str(patient.get('hisnumber', '')) > str(last_id):
-                        start_index = i
-                        break
-                else:
-                    # last_id is greater than all existing IDs
-                    return []
+            # Filter out already processed patients
+            unprocessed_patients = [
+                patient for patient in all_patients 
+                if patient.get('hisnumber') not in processed_hisnumbers
+            ]
+            
+            # Sort unprocessed patients by hisnumber for consistent ordering
+            unprocessed_patients.sort(key=lambda x: x.get('hisnumber', ''))
             
             # Get the batch
-            end_index = start_index + batch_size
-            batch = all_patients[start_index:end_index]
+            batch = unprocessed_patients[:batch_size]
             
-            self.logger.debug(f"Retrieved batch of {len(batch)} patients from YottaDB (starting from index {start_index})")
+            total_patients = len(all_patients)
+            processed_count = len(processed_hisnumbers)
+            unprocessed_count = len(unprocessed_patients)
+            
+            self.logger.info(f"YottaDB status: {total_patients} total, {processed_count} processed, {unprocessed_count} unprocessed")
+            self.logger.debug(f"Retrieved batch of {len(batch)} unprocessed patients from YottaDB")
+            
             return batch
             
         except Exception as e:
@@ -209,20 +265,32 @@ class YottaDBRepository:
     
     def get_patient_deltas(self, batch_size: int = 100) -> Tuple[List[Dict[str, Any]], int]:
         """
-        For YottaDB HTTP API, we don't have delta functionality.
-        This method returns empty results since we only do full loads.
+        Get patients that need to be updated (new or changed).
+        For YottaDB, this means comparing current API data with processed hisnumbers.
         
         Args:
-            batch_size: Maximum number of deltas to fetch (ignored)
+            batch_size: Maximum number of deltas to fetch
             
         Returns:
-            Tuple of (empty list, 0) since deltas are not supported
+            Tuple of (patient list, total_unprocessed_count)
         """
-        self.logger.info("Delta sync not supported for YottaDB HTTP API, returning empty results")
-        return [], 0
+        try:
+            # Get unprocessed patients
+            unprocessed_patients = self.get_patients(batch_size)
+            
+            # Get total count of unprocessed
+            all_patients = self._get_all_patients_cached()
+            processed_hisnumbers = self.get_processed_hisnumbers()
+            total_unprocessed = len([p for p in all_patients if p.get('hisnumber') not in processed_hisnumbers])
+            
+            return unprocessed_patients, total_unprocessed
+            
+        except Exception as e:
+            self.logger.error(f"Error getting patient deltas from YottaDB: {str(e)}")
+            return [], 0
     
     def get_last_processed_id(self) -> Optional[str]:
-        """Get last processed patient ID from state file."""
+        """Get last processed patient ID from state file (legacy support)."""
         try:
             file_path = os.path.join(self.state_dir, "yottadb_last_id.txt")
             if not os.path.exists(file_path):
@@ -236,11 +304,21 @@ class YottaDBRepository:
             return None
             
     def save_last_processed_id(self, last_id: str) -> None:
-        """Save last processed patient ID to state file."""
+        """
+        Save last processed patient ID to state file and add to processed set.
+        
+        Args:
+            last_id: Last processed hisnumber
+        """
         try:
+            # Save to legacy file for compatibility
             file_path = os.path.join(self.state_dir, "yottadb_last_id.txt")
             with open(file_path, "w") as f:
                 f.write(str(last_id))
+            
+            # Add to processed hisnumbers set
+            self.add_processed_hisnumber(last_id)
+            
             self.logger.debug(f"Saved last processed ID: {last_id}")
         except Exception as e:
             self.logger.error(f"Error saving last processed ID: {str(e)}")
@@ -299,7 +377,11 @@ class YottaDBRepository:
                 sorted_patients = sorted(all_patients, key=lambda x: str(x.get('hisnumber', '')))
                 last_id = sorted_patients[-1].get('hisnumber')
             
-            self.logger.info(f"Total patient count in YottaDB: {total_count}, last ID: {last_id}")
+            # Also get unprocessed count for better reporting
+            processed_hisnumbers = self.get_processed_hisnumbers()
+            unprocessed_count = len([p for p in all_patients if p.get('hisnumber') not in processed_hisnumbers])
+            
+            self.logger.info(f"YottaDB patient counts - Total: {total_count}, Processed: {len(processed_hisnumbers)}, Unprocessed: {unprocessed_count}")
             
             if include_last_id:
                 return total_count, last_id
@@ -312,3 +394,21 @@ class YottaDBRepository:
     def get_source_id(self) -> int:
         """Get the source ID for this repository."""
         return self.source_id
+    
+    def reset_processed_state(self) -> None:
+        """
+        Reset the processed state (clear all processed hisnumbers).
+        Useful for full re-sync.
+        """
+        try:
+            processed_file = os.path.join(self.state_dir, "yottadb_processed_hisnumbers.txt")
+            if os.path.exists(processed_file):
+                os.remove(processed_file)
+            
+            last_id_file = os.path.join(self.state_dir, "yottadb_last_id.txt")
+            if os.path.exists(last_id_file):
+                os.remove(last_id_file)
+                
+            self.logger.info("Reset YottaDB processed state - will re-process all patients")
+        except Exception as e:
+            self.logger.error(f"Error resetting processed state: {str(e)}")
