@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  patient-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - YOTTADB_API_BASE=http://192.168.156.43
+      - FIREBIRD_API_BASE=http://firebird-server
+    volumes:
+      - ./logs:/app/logs
+      - ../config:/app/src/config:ro
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: medical_etl
+      POSTGRES_USER: etl_user
+      POSTGRES_PASSWORD: etl_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
