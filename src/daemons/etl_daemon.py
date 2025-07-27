@@ -97,6 +97,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force checking if initial load is complete by comparing record counts"
     )
+    parser.add_argument(
+        "--reset-state",
+        action="store_true", 
+        help="Reset processed state (re-process all records)"
+    )
     return parser.parse_args()
 
 
@@ -210,9 +215,9 @@ def check_initial_load_complete(etl_service: ETLService) -> Tuple[bool, int, int
         logger.error(f"Error checking initial load completion: {e}")
         return False, 0, 0
 
-def perform_initial_load(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
+def perform_initial_load_firebird(etl_service: ETLService, max_records: int, force_check: bool = False) -> Dict[str, Any]:
     """
-    Perform initial data load from source to PostgreSQL using Patient model.
+    Perform initial data load from Firebird to PostgreSQL using Patient model.
     """
     source_name = etl_service.source_repo.__class__.__name__
     source_id = etl_service.source_repo.get_source_id()
@@ -438,63 +443,59 @@ def perform_initial_load(etl_service: ETLService, max_records: int, force_check:
 
 def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str, Any]:
     """
-    Perform YottaDB full synchronization (upsert all records) using Patient model.
-    Since YottaDB provides current state, we upsert everything.
+    Perform YottaDB synchronization using the new hisnumber-based tracking.
+    Process only unprocessed patients using Patient model.
     """
     source_name = etl_service.source_repo.__class__.__name__
+    source_id = etl_service.source_repo.get_source_id()
     
-    logger.info(f"Starting YottaDB full sync from {source_name}")
+    logger.info(f"Starting YottaDB sync from {source_name}")
     start_time = datetime.now()
     status = {
-        "operation": "yottadb_full_sync",
+        "operation": "yottadb_sync",
         "source": source_name,
+        "source_id": source_id,
         "start_time": start_time,
         "processed_records": 0,
         "success_count": 0,
         "error_count": 0,
         "new_records": 0,
         "updated_records": 0,
-        "last_id": None,
         "status": "running"
     }
     
     try:
+        # Get total counts for reporting
+        all_patients_count = etl_service.source_repo.get_total_patient_count()
+        processed_hisnumbers = etl_service.source_repo.get_processed_hisnumbers()
+        unprocessed_count = all_patients_count - len(processed_hisnumbers)
+        
+        logger.info(f"YottaDB status: {all_patients_count} total, {len(processed_hisnumbers)} processed, {unprocessed_count} unprocessed")
+        
+        if unprocessed_count == 0:
+            logger.info("All YottaDB patients are already processed")
+            status["end_time"] = datetime.now()
+            status["duration"] = (status["end_time"] - start_time).total_seconds()
+            status["status"] = "completed"
+            status["message"] = "All patients already processed"
+            return status
+        
         total_processed = 0
-        last_id = etl_service.source_repo.get_last_processed_id()
-        
-        if last_id:
-            logger.info(f"Resuming YottaDB sync from last processed ID: {last_id}")
-        
-        consecutive_empty_batches = 0
-        max_empty_batches = 3
         batch_counter = 0
         
-        while SHOULD_RUN and consecutive_empty_batches < max_empty_batches:
+        while SHOULD_RUN and total_processed < unprocessed_count:
             batch_counter += 1
             batch_start = datetime.now()
             
-            # Get a batch of patients from source
-            patients = etl_service.source_repo.get_patients(batch_size=max_records, last_id=last_id)
+            # Get a batch of unprocessed patients
+            logger.debug(f"Fetching batch {batch_counter} of unprocessed patients")
+            patients = etl_service.source_repo.get_patients(batch_size=max_records)
             
             if not patients:
-                consecutive_empty_batches += 1
-                logger.info(f"No more patients found beyond ID {last_id}. Empty batch {consecutive_empty_batches}/{max_empty_batches}")
-                if consecutive_empty_batches >= max_empty_batches:
-                    logger.info("YottaDB sync completed - no more records")
-                    break
-                
-                # Try incrementing last_id for YottaDB
-                try:
-                    new_last_id = str(int(last_id) + 1) if last_id else "0"
-                    last_id = new_last_id
-                    etl_service.source_repo.save_last_processed_id(last_id)
-                    logger.info(f"Incrementing last_id to {last_id} to continue search")
-                except (ValueError, TypeError):
-                    logger.warning(f"Cannot increment non-numeric last_id: {last_id}")
-                    break
-                continue
+                logger.info(f"No more unprocessed patients found after batch {batch_counter-1}")
+                break
             
-            consecutive_empty_batches = 0
+            logger.info(f"Batch {batch_counter}: Processing {len(patients)} unprocessed patients")
             
             # Process the batch of patients with UPSERT logic using Patient model
             batch_success_count = 0
@@ -523,41 +524,37 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
                             batch_updated_count += 1
                         else:
                             batch_new_count += 1
+                        
+                        # Mark this hisnumber as processed
+                        etl_service.source_repo.add_processed_hisnumber(patient.hisnumber)
+                        
+                    else:
+                        logger.error(f"Failed to upsert YottaDB patient {patient.hisnumber}")
+                        status["error_count"] += 1
                     
                 except Exception as e:
                     logger.error(f"Error processing YottaDB patient {raw_patient.get('hisnumber')}: {e}")
                     status["error_count"] += 1
-            
-            # Update tracking
-            if patients:
-                try:
-                    max_hisnumber = max(p.get('hisnumber', '0') for p in patients)
-                    if max_hisnumber:
-                        last_id = max_hisnumber
-                        etl_service.source_repo.save_last_processed_id(last_id)
-                        logger.debug(f"Updated last_id to {last_id}")
-                except Exception as e:
-                    logger.error(f"Error determining last processed ID: {e}")
             
             # Update status
             status["processed_records"] += len(patients)
             status["success_count"] += batch_success_count
             status["new_records"] += batch_new_count
             status["updated_records"] += batch_updated_count
-            status["last_id"] = last_id
             
             batch_end = datetime.now()
             batch_duration = (batch_end - batch_start).total_seconds()
-            total_processed += batch_success_count
+            total_processed += len(patients)
             
             logger.info(f"Processed YottaDB batch {batch_counter} in {batch_duration:.2f}s: "
                        f"{len(patients)} records, {batch_new_count} new, {batch_updated_count} updated, "
-                       f"total processed: {total_processed}")
+                       f"total processed: {total_processed}, remaining ~{unprocessed_count - total_processed}")
             
-            # Check if we've reached the end of data
+            # Check if we've processed all unprocessed patients
             if len(patients) < max_records:
                 logger.info(f"Retrieved fewer records ({len(patients)}) than requested ({max_records}), "
-                          f"might be near end of data")
+                          f"likely finished processing all unprocessed patients")
+                break
         
         # Save last sync time
         etl_service.source_repo.save_last_sync_time()
@@ -568,7 +565,7 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
         status["status"] = "completed" if SHOULD_RUN else "interrupted"
         
         logger.info(f"YottaDB sync {status['status']}: "
-                   f"processed {total_processed} records "
+                   f"processed {status['success_count']} records "
                    f"({status['new_records']} new, {status['updated_records']} updated) "
                    f"in {status['duration']:.2f} seconds")
         
@@ -794,6 +791,14 @@ def main():
         logger.error("Failed to create ETL service")
         return 1
     
+    # Handle state reset
+    if args.reset_state:
+        logger.info("Resetting processed state...")
+        if hasattr(etl_service.source_repo, 'reset_processed_state'):
+            etl_service.source_repo.reset_processed_state()
+        else:
+            logger.warning("Source repository doesn't support state reset")
+    
     try:
         iteration = 0
         
@@ -813,7 +818,7 @@ def main():
                 if args.source == "yottadb":
                     status = perform_yottadb_sync(etl_service, args.max_records)
                 else:
-                    status = perform_initial_load(etl_service, args.max_records, args.force_completion_check)
+                    status = perform_initial_load_firebird(etl_service, args.max_records, args.force_completion_check)
                 write_status(args.status_file, status)
                 break  # Exit after initial load
             elif args.delta_sync:
@@ -824,8 +829,8 @@ def main():
             else:
                 # Regular operation
                 if args.source == "yottadb":
-                    # For YottaDB, always do full sync
-                    logger.info("YottaDB source: performing periodic full sync")
+                    # For YottaDB, always do sync with unprocessed records
+                    logger.info("YottaDB source: performing sync of unprocessed records")
                     status = perform_yottadb_sync(etl_service, args.max_records)
                 else:
                     # For Firebird, check initial load completion and do delta sync
@@ -837,7 +842,7 @@ def main():
                         # Initial load is not complete, continue with it
                         logger.info(f"Initial load not complete for source {source_id} "
                                   f"({destination_count}/{source_count} = {destination_count/source_count*100:.1f}%). Continuing...")
-                        status = perform_initial_load(etl_service, args.max_records)
+                        status = perform_initial_load_firebird(etl_service, args.max_records)
                         
                         # If the load is still not complete, we'll continue in the next cycle
                         if status.get("status") == "completed" and status.get("completion_rate", 0) < 0.95:

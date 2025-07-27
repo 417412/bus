@@ -654,9 +654,8 @@ class TestETLIntegration:
 
     @pytest.mark.slow
     def test_yottadb_etl_process(self):
-        """Test YottaDB ETL process with full API fetch and sample processing using Patient model."""
+        """Test YottaDB ETL process with sample processing using Patient model."""
         self.logger.info("Testing YottaDB ETL process with Patient model...")
-        self.logger.info("WARNING: This will fetch all data from YottaDB API (takes 2-3 minutes)")
         
         # Create connectors with default decrypted config
         yottadb_connector = YottaDBConnector()
@@ -675,10 +674,10 @@ class TestETLIntegration:
             # Create ETL service
             etl_service = ETLService(yottadb_repo, pg_repo)
             
-            self.logger.info("Fetching all patients from YottaDB API...")
+            self.logger.info("Fetching sample patients from YottaDB API...")
             
-            # Get all patients from YottaDB (this triggers the full API call)
-            all_patients = yottadb_repo.get_patients()
+            # Get ALL patients from YottaDB (this will use the cached approach)
+            all_patients = yottadb_repo.get_all_patients_raw()
             
             if not all_patients:
                 pytest.skip("No patients retrieved from YottaDB")
@@ -754,6 +753,68 @@ class TestETLIntegration:
             # Disconnect
             yottadb_connector.disconnect()
             pg_connector.disconnect()
+
+    def test_yottadb_processed_hisnumbers_tracking(self):
+        """Test the new YottaDB processed hisnumbers tracking system."""
+        self.logger.info("Testing YottaDB processed hisnumbers tracking...")
+        
+        # Create connector
+        yottadb_connector = YottaDBConnector()
+        
+        if not yottadb_connector.connect():
+            pytest.skip("YottaDB connection not available")
+        
+        try:
+            # Create repository
+            yottadb_repo = YottaDBRepository(yottadb_connector)
+            
+            # Test the new tracking methods
+            self.logger.info("Testing processed hisnumbers methods...")
+            
+            # Get initial state
+            initial_processed = yottadb_repo.get_processed_hisnumbers()
+            self.logger.info(f"Initial processed hisnumbers count: {len(initial_processed)}")
+            
+            # Add some test hisnumbers
+            test_hisnumbers = ['TEST_001', 'TEST_002', 'TEST_003']
+            
+            for hisnumber in test_hisnumbers:
+                yottadb_repo.add_processed_hisnumber(hisnumber)
+            
+            # Verify they were added
+            updated_processed = yottadb_repo.get_processed_hisnumbers()
+            self.logger.info(f"After adding test hisnumbers: {len(updated_processed)}")
+            
+            for test_hisnumber in test_hisnumbers:
+                assert test_hisnumber in updated_processed, f"Test hisnumber {test_hisnumber} should be in processed set"
+            
+            # Test get_patients with filtering
+            self.logger.info("Testing filtered patient retrieval...")
+            
+            # Get small batch to test filtering
+            unprocessed_patients = yottadb_repo.get_patients(batch_size=5)
+            self.logger.info(f"Retrieved {len(unprocessed_patients)} unprocessed patients")
+            
+            # Verify none of the test hisnumbers appear in unprocessed patients
+            unprocessed_hisnumbers = [p.get('hisnumber') for p in unprocessed_patients]
+            for test_hisnumber in test_hisnumbers:
+                assert test_hisnumber not in unprocessed_hisnumbers, f"Test hisnumber {test_hisnumber} should not appear in unprocessed patients"
+            
+            # Test reset functionality
+            self.logger.info("Testing state reset...")
+            yottadb_repo.reset_processed_state()
+            
+            reset_processed = yottadb_repo.get_processed_hisnumbers()
+            self.logger.info(f"After reset: {len(reset_processed)} processed hisnumbers")
+            
+            # The test hisnumbers should be gone
+            for test_hisnumber in test_hisnumbers:
+                assert test_hisnumber not in reset_processed, f"Test hisnumber {test_hisnumber} should be removed after reset"
+            
+            self.logger.info("YottaDB processed hisnumbers tracking test passed")
+            
+        finally:
+            yottadb_connector.disconnect()
 
     def test_password_encryption_integration(self):
         """Test that encrypted passwords work in real database connections."""
@@ -973,6 +1034,7 @@ def run_integration_tests():
         ("Document Type Handling", test_instance.test_document_type_handling),
         ("Password Encryption Integration", test_instance.test_password_encryption_integration),
         ("Firebird ETL Process", test_instance.test_firebird_etl_process),
+        ("YottaDB Processed Hisnumbers Tracking", test_instance.test_yottadb_processed_hisnumbers_tracking),
     ]
     
     results = {}
@@ -997,7 +1059,7 @@ def run_integration_tests():
     
     # Ask about YottaDB test
     try:
-        response = input("\nRun YottaDB ETL test? (takes 2-3 minutes) [y/N]: ")
+        response = input("\nRun YottaDB ETL test? (takes time to fetch all data) [y/N]: ")
         if response.lower() in ['y', 'yes']:
             logger.info("\n--- Running YottaDB ETL Process ---")
             try:

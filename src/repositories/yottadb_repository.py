@@ -164,6 +164,16 @@ class YottaDBRepository:
         
         return self._all_patients_cache
     
+    def get_all_patients_raw(self) -> List[Dict[str, Any]]:
+        """
+        Get ALL patients from the API without any filtering.
+        This is used for debugging and admin purposes.
+        
+        Returns:
+            List of all patient records (unfiltered)
+        """
+        return self._get_all_patients_cached()
+    
     def get_processed_hisnumbers(self) -> Set[str]:
         """
         Get set of all hisnumbers that have been processed from state file.

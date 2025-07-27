@@ -211,62 +211,6 @@ def debug_firebird_patient(hisnumber: str, logger, dry_run: bool = False):
         fb_connector.disconnect()
         pg_connector.disconnect()
 
-def get_all_yottadb_patients(yottadb_repo, logger):
-    """
-    Get ALL patients from YottaDB by fetching all batches.
-    
-    Args:
-        yottadb_repo: YottaDB repository instance
-        logger: Logger instance
-        
-    Returns:
-        List of all patient records
-    """
-    logger.info("Fetching ALL patients from YottaDB using batch mechanism...")
-    
-    all_patients = []
-    last_id = None
-    batch_size = 1000  # Reasonable batch size
-    batch_count = 0
-    
-    while True:
-        batch_count += 1
-        logger.info(f"Fetching batch {batch_count} (last_id: {last_id})")
-        
-        # Get next batch
-        batch = yottadb_repo.get_patients(batch_size=batch_size, last_id=last_id)
-        
-        if not batch:
-            logger.info(f"No more patients found after batch {batch_count-1}")
-            break
-        
-        all_patients.extend(batch)
-        logger.info(f"Batch {batch_count}: got {len(batch)} patients, total so far: {len(all_patients)}")
-        
-        # Update last_id for next batch
-        if batch:
-            # Get the maximum hisnumber from this batch
-            batch_hisnumbers = [p.get('hisnumber') for p in batch if p.get('hisnumber')]
-            if batch_hisnumbers:
-                # Sort to get the last one (assuming hisnumbers can be sorted)
-                try:
-                    # For YottaDB hisnumbers like "123/A22", sort by the numeric part
-                    sorted_hisnumbers = sorted(batch_hisnumbers, key=lambda x: int(str(x).split('/')[0]) if '/' in str(x) else int(str(x)))
-                    last_id = sorted_hisnumbers[-1]
-                except (ValueError, TypeError):
-                    # Fallback to simple string sort
-                    last_id = max(batch_hisnumbers, key=str)
-                
-                logger.debug(f"Updated last_id to: {last_id}")
-        
-        # Safety check to avoid infinite loops
-        if len(all_patients) > 500000:  # More than 500k patients seems unlikely
-            logger.warning(f"Fetched {len(all_patients)} patients, stopping to avoid infinite loop")
-            break
-    
-    logger.info(f"Finished fetching: {len(all_patients)} total patients from {batch_count-1} batches")
-    return all_patients
-
 def debug_yottadb_patient(hisnumber: str, logger, dry_run: bool = False):
     """Debug a single patient from YottaDB/qMS."""
     
@@ -296,11 +240,12 @@ def debug_yottadb_patient(hisnumber: str, logger, dry_run: bool = False):
         
         logger.info(f"ETL service transformer: {type(etl_service.transformer).__name__}")
         
-        # Get ALL patients using batch mechanism
+        # Get ALL patients from YottaDB API (this will be cached)
         logger.info(f"STEP 2: Fetching ALL patients from YottaDB to find {hisnumber}")
-        logger.info("This will take several minutes and fetch all batches...")
+        logger.info("This may take a few minutes on first run (cached afterwards)...")
         
-        all_patients = get_all_yottadb_patients(yottadb_repo, logger)
+        # Use the new method to get all patients without filtering
+        all_patients = yottadb_repo.get_all_patients_raw()
         
         if not all_patients:
             logger.error("No patients retrieved from YottaDB")
@@ -322,8 +267,8 @@ def debug_yottadb_patient(hisnumber: str, logger, dry_run: bool = False):
                 logger.info(f"Found patient at index {i}")
                 break
             
-            # Progress indicator
-            if i % 10000 == 0 and i > 0:
+            # Progress indicator for large datasets
+            if i > 0 and i % 50000 == 0:
                 logger.info(f"Searched {i} patients so far...")
         
         if not target_patient:
@@ -357,7 +302,7 @@ def debug_yottadb_patient(hisnumber: str, logger, dry_run: bool = False):
                 patient_hisnumber = str(patient.get('hisnumber', ''))
                 if search_pattern in patient_hisnumber:
                     similar_patients.append(patient_hisnumber)
-                    if len(similar_patients) >= 20:  # Show more matches
+                    if len(similar_patients) >= 20:  # Show first 20 matches
                         break
             
             if similar_patients:
