@@ -327,4 +327,30 @@ BEGIN
     RETURN NEW;
 END;$$ LANGUAGE plpgsql;
 
--- ... rest of file remains the same ...
+-- Create optimized triggers
+DROP TRIGGER IF EXISTS trg_process_new_patient ON patientsdet;
+CREATE TRIGGER trg_process_new_patient
+    BEFORE INSERT ON patientsdet
+    FOR EACH ROW
+    EXECUTE FUNCTION process_new_patient();
+
+DROP TRIGGER IF EXISTS trg_update_patient ON patientsdet;
+CREATE TRIGGER trg_update_patient
+    AFTER UPDATE ON patientsdet
+    FOR EACH ROW
+    EXECUTE FUNCTION update_patient_from_patientsdet();
+
+-- Performance monitoring view (fixed for PostgreSQL compatibility)
+CREATE OR REPLACE VIEW trigger_performance_stats AS
+SELECT 
+    schemaname,
+    relname as tablename,
+    n_tup_ins as inserts,
+    n_tup_upd as updates,
+    n_tup_del as deletes,
+    seq_scan,
+    seq_tup_read,
+    idx_scan,
+    idx_tup_fetch
+FROM pg_stat_user_tables 
+WHERE relname IN ('patients', 'patientsdet', 'patient_matching_log');
