@@ -112,37 +112,13 @@ class PatientResponse(BaseModel):
     action: Optional[str] = Field(None, description="Action performed (update/create)")
     mobile_uuid: Optional[str] = Field(None, description="Mobile app user UUID if created")
 
-# Global OAuth token cache
+# Global OAuth token cache and locks
 oauth_tokens = {}
 oauth_locks = {}  # Per-system locks
 
 # Dependency to get patient repository
 def get_patient_repo() -> PatientRepository:
     return get_patient_repository()
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database connection on startup."""
-    try:
-        logger.info("Initializing Patient Credential Management API...")
-        
-        # Initialize database
-        if not await initialize_database():
-            raise Exception("Database initialization failed")
-        
-        logger.info("API initialization completed successfully")
-        
-    except Exception as e:
-        logger.error(f"Failed to initialize API: {e}")
-        raise e
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources on shutdown."""
-    logger.info("Shutting down Patient Credential Management API...")
-    await close_database()
-    logger.info("API shutdown completed")
-
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
     """
@@ -443,8 +419,13 @@ async def register_mobile_app_user_api(hisnumber_qms: Optional[str] = None,
 async def check_modify_patient(request: PatientCredentialRequest,
                              patient_repo: PatientRepository = Depends(get_patient_repo)):
     """
-    Check and modify patient credentials across HIS systems.
+    MAIN API ENDPOINT: Check and modify patient credentials across HIS systems.
     If patient not found, creates patient in both HIS systems and registers mobile app user.
+    
+    This is the core functionality:
+    1. Search for existing patient by credentials
+    2. If found: Update login/password in HIS systems 
+    3. If not found: Create new patient in both HIS systems and register mobile app user
     """
     logger.info(f"Processing credential request for patient: {request.lastname}, {request.firstname}")
     
@@ -459,7 +440,7 @@ async def check_modify_patient(request: PatientCredentialRequest,
         )
         
         if patient:
-            # Patient found - update credentials
+            # PATIENT FOUND - UPDATE CREDENTIALS IN HIS SYSTEMS
             logger.info(f"Patient found, updating credentials: {patient['uuid']}")
             
             # Prepare authenticated API calls for both HIS systems
@@ -539,7 +520,7 @@ async def check_modify_patient(request: PatientCredentialRequest,
                 )
         
         else:
-            # Patient not found - create in both HIS systems
+            # PATIENT NOT FOUND - CREATE NEW PATIENT IN BOTH HIS SYSTEMS
             logger.info(f"Patient not found, creating in both HIS systems: {request.lastname}, {request.firstname}")
             
             # Prepare patient creation calls for both HIS systems
@@ -638,6 +619,8 @@ async def check_modify_patient(request: PatientCredentialRequest,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
         )
+
+# ALL OTHER ENDPOINTS ARE SUPPORTING/UTILITY ENDPOINTS
 
 @app.get("/health")
 async def health_check():
@@ -863,7 +846,8 @@ async def root():
         "version": API_CONFIG["version"],
         "description": API_CONFIG["description"],
         "docs_url": "/docs",
-        "health_url": "/health"
+        "health_url": "/health",
+        "main_endpoint": "/checkModifyPatient"
     }
 
 if __name__ == "__main__":

@@ -1,322 +1,333 @@
 """
-Database connection and utilities for the API.
+Database connection and repository management for the API.
 """
 
 import asyncio
+import asyncpg
+from datetime import datetime
+from typing import Dict, Any, Optional, List
 import logging
-from typing import Optional, Dict, Any, List, Tuple
 from contextlib import asynccontextmanager
-import psycopg2
-from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
 
 from src.api.config import get_postgresql_config, setup_api_logger
 
 logger = setup_api_logger("api_database")
 
-class PostgreSQLPool:
-    """PostgreSQL connection pool for API operations."""
+# Global connection pool
+_connection_pool = None
+_pool_lock = asyncio.Lock()
+
+class DatabasePool:
+    """Database connection pool manager."""
     
     def __init__(self):
-        self.pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
-        self.config = get_postgresql_config()
-        
-    def initialize_pool(self, minconn: int = 1, maxconn: int = 10):
+        self.pool = None
+        self._initialized = False
+    
+    async def initialize(self) -> bool:
         """Initialize the connection pool."""
-        try:
-            self.pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=minconn,
-                maxconn=maxconn,
-                host=self.config["host"],
-                port=self.config["port"],
-                database=self.config["database"],
-                user=self.config["user"],
-                password=self.config["password"],
-                connect_timeout=self.config["connect_timeout"],
-                cursor_factory=RealDictCursor
-            )
-            logger.info(f"PostgreSQL connection pool initialized (min={minconn}, max={maxconn})")
+        if self._initialized:
             return True
+        
+        try:
+            pg_config = get_postgresql_config()
+            
+            # Create connection pool
+            self.pool = await asyncpg.create_pool(
+                host=pg_config["host"],
+                port=pg_config["port"],
+                database=pg_config["database"],
+                user=pg_config["user"],
+                password=pg_config["password"],
+                min_size=5,
+                max_size=20,
+                command_timeout=pg_config.get("command_timeout", 60)
+            )
+            
+            self._initialized = True
+            logger.info("Database connection pool initialized successfully")
+            return True
+            
         except Exception as e:
-            logger.error(f"Failed to initialize PostgreSQL pool: {e}")
+            logger.error(f"Failed to initialize database pool: {e}")
             return False
     
-    def close_pool(self):
-        """Close all connections in the pool."""
+    async def close(self):
+        """Close the connection pool."""
         if self.pool:
-            self.pool.closeall()
-            self.pool = None
-            logger.info("PostgreSQL connection pool closed")
+            await self.pool.close()
+            self._initialized = False
+            logger.info("Database connection pool closed")
     
-    @asynccontextmanager
-    async def get_connection(self):
-        """Get a connection from the pool (async context manager)."""
-        if not self.pool:
-            raise RuntimeError("Connection pool not initialized")
-        
-        connection = None
-        try:
-            # Get connection from pool (this might block, so we use a thread)
-            loop = asyncio.get_event_loop()
-            connection = await loop.run_in_executor(None, self.pool.getconn)
-            
-            logger.debug("Database connection acquired from pool")
-            yield connection
-            
-        except Exception as e:
-            logger.error(f"Database connection error: {e}")
-            if connection:
-                # Rollback any pending transaction
-                try:
-                    connection.rollback()
-                except:
-                    pass
-            raise
-        finally:
-            if connection:
-                try:
-                    # Return connection to pool
-                    await loop.run_in_executor(None, self.pool.putconn, connection)
-                    logger.debug("Database connection returned to pool")
-                except Exception as e:
-                    logger.error(f"Error returning connection to pool: {e}")
-    
-    def get_sync_connection(self):
-        """Get a synchronous connection from the pool."""
-        if not self.pool:
-            raise RuntimeError("Connection pool not initialized")
-        
-        return self.pool.getconn()
-    
-    def return_sync_connection(self, connection):
-        """Return a synchronous connection to the pool."""
-        if self.pool and connection:
-            self.pool.putconn(connection)
-    
-    async def execute_query(self, query: str, params: Tuple = None) -> List[Dict[str, Any]]:
+    async def execute_query(self, query: str, params: tuple = None) -> List[tuple]:
         """Execute a query and return results."""
-        async with self.get_connection() as conn:
-            loop = asyncio.get_event_loop()
+        if not self.pool:
+            raise Exception("Database pool not initialized")
+        
+        async with self.pool.acquire() as connection:
+            if params:
+                result = await connection.fetch(query, *params)
+            else:
+                result = await connection.fetch(query)
             
-            def _execute():
-                with conn.cursor() as cursor:
-                    cursor.execute(query, params)
-                    if cursor.description:
-                        columns = [desc[0] for desc in cursor.description]
-                        rows = cursor.fetchall()
-                        return [dict(zip(columns, row)) for row in rows]
-                    return []
-            
-            return await loop.run_in_executor(None, _execute)
+            return [tuple(row) for row in result]
     
-    async def execute_insert(self, query: str, params: Tuple = None) -> Optional[Any]:
-        """Execute an insert query and return the inserted ID or result."""
-        async with self.get_connection() as conn:
-            loop = asyncio.get_event_loop()
+    async def execute_command(self, command: str, params: tuple = None) -> str:
+        """Execute a command and return status."""
+        if not self.pool:
+            raise Exception("Database pool not initialized")
+        
+        async with self.pool.acquire() as connection:
+            if params:
+                result = await connection.execute(command, *params)
+            else:
+                result = await connection.execute(command)
             
-            def _execute():
-                with conn.cursor() as cursor:
-                    cursor.execute(query, params)
-                    conn.commit()
-                    
-                    # Try to get the returned value (for RETURNING clauses)
-                    if cursor.description:
-                        result = cursor.fetchone()
-                        return dict(result) if result else None
-                    return cursor.rowcount
-            
-            return await loop.run_in_executor(None, _execute)
+            return result
     
-    async def execute_update(self, query: str, params: Tuple = None) -> int:
-        """Execute an update query and return the number of affected rows."""
-        async with self.get_connection() as conn:
-            loop = asyncio.get_event_loop()
-            
-            def _execute():
-                with conn.cursor() as cursor:
-                    cursor.execute(query, params)
-                    conn.commit()
-                    return cursor.rowcount
-            
-            return await loop.run_in_executor(None, _execute)
-    
-    async def check_health(self) -> bool:
-        """Check if the database connection is healthy."""
+    async def check_health(self) -> Dict[str, Any]:
+        """Check database health."""
         try:
-            result = await self.execute_query("SELECT 1 as health_check")
-            return len(result) > 0 and result[0].get("health_check") == 1
+            if not self.pool:
+                return {"status": "unhealthy", "error": "Pool not initialized"}
+            
+            async with self.pool.acquire() as connection:
+                await connection.fetchval("SELECT 1")
+                
+                # Get some basic stats
+                patients_count = await connection.fetchval("SELECT COUNT(*) FROM patients")
+                mobile_users_count = await connection.fetchval("SELECT COUNT(*) FROM mobile_app_users")
+                
+                return {
+                    "status": "healthy",
+                    "patients_count": patients_count,
+                    "mobile_users_count": mobile_users_count,
+                    "pool_size": self.pool.get_size(),
+                    "pool_max_size": self.pool.get_max_size()
+                }
         except Exception as e:
-            logger.error(f"Database health check failed: {e}")
-            return False
+            return {"status": "unhealthy", "error": str(e)}
 
-# Global connection pool instance
-db_pool = PostgreSQLPool()
+# Global database pool instance
+db_pool = DatabasePool()
 
-async def initialize_database():
-    """Initialize the database connection pool."""
-    return db_pool.initialize_pool()
+async def initialize_database() -> bool:
+    """Initialize the database connection."""
+    global _connection_pool
+    
+    async with _pool_lock:
+        if _connection_pool is None:
+            _connection_pool = db_pool
+        
+        return await _connection_pool.initialize()
 
 async def close_database():
-    """Close the database connection pool."""
-    db_pool.close_pool()
+    """Close the database connection."""
+    global _connection_pool
+    
+    if _connection_pool:
+        await _connection_pool.close()
+        _connection_pool = None
 
 async def get_database_health() -> Dict[str, Any]:
-    """Get database health information."""
-    try:
-        is_healthy = await db_pool.check_health()
-        
-        if is_healthy:
-            # Get additional database info
-            stats = await db_pool.execute_query("""
-                SELECT 
-                    current_database() as database_name,
-                    current_user as current_user,
-                    version() as version
-            """)
-            
-            return {
-                "status": "healthy",
-                "database": stats[0]["database_name"] if stats else "unknown",
-                "user": stats[0]["current_user"] if stats else "unknown",
-                "version": stats[0]["version"][:50] + "..." if stats and len(stats[0]["version"]) > 50 else stats[0]["version"] if stats else "unknown"
-            }
-        else:
-            return {
-                "status": "unhealthy",
-                "error": "Health check query failed"
-            }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+    """Get database health status."""
+    if _connection_pool:
+        return await _connection_pool.check_health()
+    else:
+        return {"status": "not_initialized"}
 
 class PatientRepository:
     """Repository for patient-related database operations."""
     
-    def __init__(self, pool: PostgreSQLPool):
-        self.pool = pool
+    def __init__(self, pool: DatabasePool = None):
+        self.pool = pool or db_pool
     
     async def find_patient_by_credentials(self, lastname: str, firstname: str, 
                                         midname: Optional[str], bdate: str, 
                                         cllogin: str) -> Optional[Dict[str, Any]]:
-        """Find patient by demographic data and login."""
-        if midname:
-            query = """
-                SELECT 
-                    uuid, lastname, name, surname, birthdate,
-                    hisnumber_qms, hisnumber_infoclinica,
-                    login_qms, login_infoclinica,
-                    registered_via_mobile, matching_locked
-                FROM patients 
-                WHERE lastname = %s 
-                AND name = %s 
-                AND surname = %s
-                AND birthdate = %s
-                AND (login_qms = %s OR login_infoclinica = %s)
-                AND matching_locked = FALSE
-                LIMIT 1
-            """
-            params = (lastname, firstname, midname, bdate, cllogin, cllogin)
-        else:
-            query = """
-                SELECT 
-                    uuid, lastname, name, surname, birthdate,
-                    hisnumber_qms, hisnumber_infoclinica,
-                    login_qms, login_infoclinica,
-                    registered_via_mobile, matching_locked
-                FROM patients 
-                WHERE lastname = %s 
-                AND name = %s 
-                AND (surname IS NULL OR surname = '')
-                AND birthdate = %s
-                AND (login_qms = %s OR login_infoclinica = %s)
-                AND matching_locked = FALSE
-                LIMIT 1
-            """
-            params = (lastname, firstname, bdate, cllogin, cllogin)
+        """
+        Find patient in database by demographic data and login.
         
-        results = await self.pool.execute_query(query, params)
-        return results[0] if results else None
+        This function searches for patients using the same logic as the triggers:
+        1. Match by lastname, firstname (name), midname (surname), birthdate
+        2. Check if cllogin matches either login_qms or login_infoclinica
+        """
+        try:
+            if midname:
+                query = """
+                    SELECT 
+                        uuid, lastname, name, surname, birthdate,
+                        hisnumber_qms, hisnumber_infoclinica,
+                        login_qms, login_infoclinica,
+                        registered_via_mobile, matching_locked
+                    FROM patients 
+                    WHERE lastname = $1 
+                    AND name = $2 
+                    AND surname = $3
+                    AND birthdate = $4
+                    AND (login_qms = $5 OR login_infoclinica = $5)
+                    LIMIT 1
+                """
+                params = (lastname, firstname, midname, bdate, cllogin)
+            else:
+                query = """
+                    SELECT 
+                        uuid, lastname, name, surname, birthdate,
+                        hisnumber_qms, hisnumber_infoclinica,
+                        login_qms, login_infoclinica,
+                        registered_via_mobile, matching_locked
+                    FROM patients 
+                    WHERE lastname = $1 
+                    AND name = $2 
+                    AND (surname IS NULL OR surname = '')
+                    AND birthdate = $3
+                    AND (login_qms = $4 OR login_infoclinica = $4)
+                    LIMIT 1
+                """
+                params = (lastname, firstname, bdate, cllogin)
+            
+            results = await self.pool.execute_query(query, params)
+            
+            if not results:
+                return None
+            
+            # Convert to dictionary
+            columns = ['uuid', 'lastname', 'name', 'surname', 'birthdate',
+                      'hisnumber_qms', 'hisnumber_infoclinica', 
+                      'login_qms', 'login_infoclinica',
+                      'registered_via_mobile', 'matching_locked']
+            
+            return dict(zip(columns, results[0]))
+            
+        except Exception as e:
+            logger.error(f"Error finding patient by credentials: {e}")
+            raise
     
-    async def register_mobile_app_user(self, hisnumber_qms: Optional[str] = None,
-                                     hisnumber_infoclinica: Optional[str] = None) -> Optional[str]:
-        """Register a mobile app user."""
-        if not hisnumber_qms and not hisnumber_infoclinica:
+    async def register_mobile_app_user(self, hisnumber_qms: Optional[str], 
+                                     hisnumber_infoclinica: Optional[str]) -> Optional[str]:
+        """Register a mobile app user and return UUID."""
+        try:
+            if not hisnumber_qms and not hisnumber_infoclinica:
+                return None
+            
+            query = """
+                INSERT INTO mobile_app_users (hisnumber_qms, hisnumber_infoclinica)
+                VALUES ($1, $2)
+                RETURNING uuid
+            """
+            params = (hisnumber_qms, hisnumber_infoclinica)
+            
+            results = await self.pool.execute_query(query, params)
+            
+            if results:
+                return str(results[0][0])
+            
             return None
-        
-        query = """
-            INSERT INTO mobile_app_users (hisnumber_qms, hisnumber_infoclinica)
-            VALUES (%s, %s)
-            RETURNING uuid
-        """
-        
-        result = await self.pool.execute_insert(query, (hisnumber_qms, hisnumber_infoclinica))
-        return str(result["uuid"]) if result else None
+            
+        except Exception as e:
+            logger.error(f"Error registering mobile app user: {e}")
+            return None
     
-    async def get_mobile_app_stats(self) -> Dict[str, Any]:
-        """Get mobile app user statistics."""
-        query = """
-            SELECT 
-                COUNT(*) as total_mobile_users,
-                COUNT(CASE WHEN hisnumber_qms IS NOT NULL AND hisnumber_infoclinica IS NOT NULL THEN 1 END) as both_his_registered,
-                COUNT(CASE WHEN hisnumber_qms IS NOT NULL AND hisnumber_infoclinica IS NULL THEN 1 END) as qms_only,
-                COUNT(CASE WHEN hisnumber_qms IS NULL AND hisnumber_infoclinica IS NOT NULL THEN 1 END) as infoclinica_only
-            FROM mobile_app_users
-        """
-        
-        results = await self.pool.execute_query(query)
-        return results[0] if results else {}
-    
-    async def get_patient_matching_stats(self) -> List[Dict[str, Any]]:
-        """Get patient matching statistics."""
-        query = """
-            SELECT 
-                match_type,
-                COUNT(*) as count,
-                COUNT(CASE WHEN created_uuid THEN 1 END) as new_patients_created,
-                COUNT(CASE WHEN mobile_app_uuid IS NOT NULL THEN 1 END) as mobile_app_matches
-            FROM patient_matching_log
-            WHERE match_time >= NOW() - INTERVAL '24 hours'
-            GROUP BY match_type
-            ORDER BY count DESC
-        """
-        
-        return await self.pool.execute_query(query)
-    
-    async def lock_patient_matching(self, patient_uuid: str, reason: str = "API lock") -> bool:
+    async def lock_patient_matching(self, patient_uuid: str, reason: str) -> bool:
         """Lock patient from further matching."""
-        query = """
-            UPDATE patients
-            SET 
-                matching_locked = TRUE,
-                matching_locked_at = CURRENT_TIMESTAMP,
-                matching_locked_reason = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE uuid = %s
-        """
-        
-        affected_rows = await self.pool.execute_update(query, (reason, patient_uuid))
-        return affected_rows > 0
+        try:
+            query = """
+                UPDATE patients 
+                SET matching_locked = TRUE,
+                    matching_locked_at = CURRENT_TIMESTAMP,
+                    matching_locked_reason = $2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE uuid = $1
+            """
+            params = (patient_uuid, reason)
+            
+            result = await self.pool.execute_command(query, params)
+            return "UPDATE 1" in result
+            
+        except Exception as e:
+            logger.error(f"Error locking patient matching: {e}")
+            return False
     
     async def unlock_patient_matching(self, patient_uuid: str) -> bool:
         """Unlock patient matching."""
-        query = """
-            UPDATE patients
-            SET 
-                matching_locked = FALSE,
-                matching_locked_at = NULL,
-                matching_locked_reason = NULL,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE uuid = %s
-        """
-        
-        affected_rows = await self.pool.execute_update(query, (patient_uuid,))
-        return affected_rows > 0
-
-# Global patient repository instance
-patient_repo = PatientRepository(db_pool)
+        try:
+            query = """
+                UPDATE patients 
+                SET matching_locked = FALSE,
+                    matching_locked_at = NULL,
+                    matching_locked_reason = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE uuid = $1
+            """
+            params = (patient_uuid,)
+            
+            result = await self.pool.execute_command(query, params)
+            return "UPDATE 1" in result
+            
+        except Exception as e:
+            logger.error(f"Error unlocking patient matching: {e}")
+            return False
+    
+    async def get_mobile_app_stats(self) -> Dict[str, int]:
+        """Get mobile app user statistics."""
+        try:
+            query = """
+                SELECT 
+                    COUNT(*) as total_mobile_users,
+                    COUNT(CASE WHEN hisnumber_qms IS NOT NULL AND hisnumber_infoclinica IS NOT NULL THEN 1 END) as both_his_registered,
+                    COUNT(CASE WHEN hisnumber_qms IS NOT NULL AND hisnumber_infoclinica IS NULL THEN 1 END) as qms_only,
+                    COUNT(CASE WHEN hisnumber_qms IS NULL AND hisnumber_infoclinica IS NOT NULL THEN 1 END) as infoclinica_only
+                FROM mobile_app_users
+            """
+            
+            results = await self.pool.execute_query(query)
+            
+            if results:
+                return {
+                    "total_mobile_users": results[0][0],
+                    "both_his_registered": results[0][1],
+                    "qms_only": results[0][2],
+                    "infoclinica_only": results[0][3]
+                }
+            
+            return {"total_mobile_users": 0, "both_his_registered": 0, "qms_only": 0, "infoclinica_only": 0}
+            
+        except Exception as e:
+            logger.error(f"Error getting mobile app stats: {e}")
+            return {"total_mobile_users": 0, "both_his_registered": 0, "qms_only": 0, "infoclinica_only": 0}
+    
+    async def get_patient_matching_stats(self) -> List[Dict[str, Any]]:
+        """Get patient matching statistics for the last 24 hours."""
+        try:
+            query = """
+                SELECT 
+                    match_type,
+                    COUNT(*) as count,
+                    COUNT(CASE WHEN created_uuid THEN 1 END) as new_patients_created,
+                    COUNT(CASE WHEN mobile_app_uuid IS NOT NULL THEN 1 END) as mobile_app_matches
+                FROM patient_matching_log
+                WHERE match_time >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                GROUP BY match_type
+                ORDER BY count DESC
+            """
+            
+            results = await self.pool.execute_query(query)
+            
+            stats = []
+            for row in results:
+                stats.append({
+                    "match_type": row[0],
+                    "count": row[1],
+                    "new_patients_created": row[2],
+                    "mobile_app_matches": row[3]
+                })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting patient matching stats: {e}")
+            return []
 
 def get_patient_repository() -> PatientRepository:
-    """Get the patient repository instance."""
-    return patient_repo
+    """Get patient repository instance."""
+    return PatientRepository()

@@ -1,0 +1,51 @@
+[Unit]
+Description=Patient Credential Management API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/bus/src/api
+Environment=PATH=python3
+Environment=ENVIRONMENT=production
+Environment=DEBUG=false
+Environment=LOG_LEVEL=INFO
+
+# HIS API Configuration
+Environment=YOTTADB_API_BASE=http://192.168.156.43
+Environment=YOTTADB_TOKEN_URL=http://192.168.156.43/token
+Environment=YOTTADB_CLIENT_ID=admin
+Environment=YOTTADB_CLIENT_SECRET=secret
+Environment=YOTTADB_USERNAME=admin
+Environment=YOTTADB_PASSWORD=secret
+Environment=YOTTADB_SCOPE=
+
+Environment=FIREBIRD_API_BASE=http://192.168.160.141
+Environment=FIREBIRD_TOKEN_URL=http://192.168.160.141/token
+Environment=FIREBIRD_CLIENT_ID=admin
+Environment=FIREBIRD_CLIENT_SECRET=secret
+Environment=FIREBIRD_USERNAME=admin
+Environment=FIREBIRD_PASSWORD=secret
+Environment=FIREBIRD_SCOPE=
+
+# Mobile App Configuration
+Environment=MOBILE_APP_REGISTRATION_ENABLED=true
+Environment=MOBILE_APP_AUTO_REGISTER=true
+Environment=MOBILE_APP_REQUIRE_BOTH_HIS=false
+
+# Security
+Environment=CORS_ENABLED=true
+Environment=CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+
+ExecStart=/path/to/your/project/src/api/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/patient-api/access.log
+StandardError=append:/var/log/patient-api/error.log
+
+[Install]
+WantedBy=multi-user.target
