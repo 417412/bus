@@ -104,6 +104,10 @@ class PatientCredentialRequest(BaseModel):
             return v
         except ValueError:
             raise ValueError('Birth date must be in YYYY-MM-DD format')
+    
+    def get_bdate_as_date(self) -> date:
+        """Convert bdate string to date object for database operations."""
+        return datetime.strptime(self.bdate, '%Y-%m-%d').date()
 
 class PatientResponse(BaseModel):
     """Response model for patient operations."""
@@ -480,7 +484,7 @@ async def check_modify_patient(request: PatientCredentialRequest,
             lastname=request.lastname,
             firstname=request.firstname,
             midname=request.midname,
-            bdate=request.bdate,
+            bdate=request.get_bdate_as_date(),  # FIXED: Convert to date object
             cllogin=request.cllogin
         )
         
