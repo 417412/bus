@@ -445,23 +445,6 @@ async def check_modify_patient(request: PatientCredentialRequest,
     """
     Check and modify patient credentials across HIS systems.
     If patient not found, creates patient in both HIS systems and registers mobile app user.
-    
-    This endpoint:
-    1. Searches for the patient in PostgreSQL using demographic data and login
-    2. If found: Updates credentials in both YottaDB and Firebird via authenticated API calls
-    3. If not found: Creates patient in both YottaDB and Firebird via authenticated API calls
-    4. Registers mobile app user if creation succeeded and configuration allows
-    5. Returns success status with action performed
-    
-    Args:
-        request: Patient credential request containing demographic data and credentials
-        patient_repo: Patient repository dependency
-        
-    Returns:
-        PatientResponse with success status, action performed, and mobile UUID if created
-        
-    Raises:
-        HTTPException: If both update/create operations fail
     """
     logger.info(f"Processing credential request for patient: {request.lastname}, {request.firstname}")
     
@@ -574,6 +557,7 @@ async def check_modify_patient(request: PatientCredentialRequest,
             success_count = 0
             failed_systems = []
             created_hisnumbers = {}
+            successful_systems = []
             
             for i, result in enumerate(results):
                 system_name = systems_to_create[i]
@@ -582,25 +566,34 @@ async def check_modify_patient(request: PatientCredentialRequest,
                 if isinstance(result, Exception):
                     logger.error(f"{system_name} creation failed with exception: {result}")
                     failed_systems.append(system_name)
-                elif isinstance(result, dict) and result.get('success'):
-                    success_count += 1
-                    hisnumber = result.get('hisnumber')
-                    if hisnumber:
-                        created_hisnumbers[his_type] = hisnumber
-                        logger.info(f"{system_name} creation completed successfully, HIS number: {hisnumber}")
+                elif isinstance(result, dict):
+                    if result.get('success'):
+                        success_count += 1
+                        successful_systems.append(system_name)
+                        hisnumber = result.get('hisnumber')
+                        if hisnumber:
+                            created_hisnumbers[his_type] = hisnumber
+                            logger.info(f"{system_name} creation completed successfully, HIS number: {hisnumber}")
+                        else:
+                            logger.info(f"{system_name} creation completed successfully")
                     else:
-                        logger.info(f"{system_name} creation completed successfully")
-                elif result:
-                    success_count += 1
-                    logger.info(f"{system_name} creation completed successfully")
+                        logger.error(f"{system_name} creation failed: {result.get('error')}")
+                        failed_systems.append(system_name)
                 else:
-                    logger.error(f"{system_name} creation failed")
-                    failed_systems.append(system_name)
+                    # Legacy boolean response
+                    if result:
+                        success_count += 1
+                        successful_systems.append(system_name)
+                        logger.info(f"{system_name} creation completed successfully")
+                    else:
+                        logger.error(f"{system_name} creation failed")
+                        failed_systems.append(system_name)
             
-            # Register mobile app user if enabled and at least one creation succeeded
+            # Register mobile app user if at least one creation succeeded
             mobile_uuid = None
             if (MOBILE_APP_CONFIG["auto_register_on_create"] and 
-                success_count > 0 and created_hisnumbers):
+                success_count > 0 and 
+                (created_hisnumbers or not MOBILE_APP_CONFIG["require_both_his"])):
                 
                 mobile_uuid = await register_mobile_app_user_api(
                     hisnumber_qms=created_hisnumbers.get('yottadb'),
@@ -611,7 +604,7 @@ async def check_modify_patient(request: PatientCredentialRequest,
             # Return appropriate response for creation
             if success_count == len(create_tasks):
                 logger.info(f"All {success_count} patient creations completed successfully")
-                response_message = f"Patient created successfully in {success_count} system(s): {', '.join(systems_to_create)}"
+                response_message = f"Patient created successfully in {success_count} system(s): {', '.join(successful_systems)}"
                 
                 return PatientResponse(
                     success="true",
@@ -621,9 +614,6 @@ async def check_modify_patient(request: PatientCredentialRequest,
                 )
             elif success_count > 0:
                 logger.warning(f"Partial success: {success_count}/{len(create_tasks)} creations completed")
-                successful_systems = [systems_to_create[i] for i, result in enumerate(results) 
-                                    if (isinstance(result, dict) and result.get('success')) or 
-                                       (result and not isinstance(result, Exception))]
                 failed_list = ", ".join(failed_systems)
                 response_message = f"Patient created in: {', '.join(successful_systems)}. Failed: {failed_list}"
                 
@@ -639,9 +629,8 @@ async def check_modify_patient(request: PatientCredentialRequest,
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Failed to create patient in any HIS system"
                 )
-            
+    
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
         logger.error(f"Unexpected error processing request: {e}")
@@ -813,14 +802,8 @@ async def test_patient_creation(his_type: str, patient_data: PatientCredentialRe
 async def register_mobile_user(hisnumber_qms: Optional[str] = None,
                               hisnumber_infoclinica: Optional[str] = None,
                               patient_repo: PatientRepository = Depends(get_patient_repo)):
-    """Manually register a mobile app user."""
+    """Register a mobile app user."""
     try:
-        if not MOBILE_APP_CONFIG["registration_enabled"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Mobile app registration is disabled"
-            )
-        
         mobile_uuid = await register_mobile_app_user_api(
             hisnumber_qms=hisnumber_qms,
             hisnumber_infoclinica=hisnumber_infoclinica,
@@ -828,74 +811,48 @@ async def register_mobile_user(hisnumber_qms: Optional[str] = None,
         )
         
         if mobile_uuid:
-            return {
-                "success": True,
-                "mobile_uuid": mobile_uuid,
-                "message": "Mobile app user registered successfully"
-            }
+            return {"success": True, "mobile_uuid": mobile_uuid, "message": "Mobile user registered successfully"}
         else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to register mobile app user"
-            )
-    except HTTPException:
-        raise
+            return {"success": False, "message": "Failed to register mobile user"}
     except Exception as e:
-        logger.error(f"Error in manual mobile user registration: {e}")
+        logger.error(f"Error registering mobile user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error registering mobile user: {str(e)}"
         )
 
 @app.post("/patient/{patient_uuid}/lock")
 async def lock_patient_matching(patient_uuid: str, reason: str = "Manual lock",
                                patient_repo: PatientRepository = Depends(get_patient_repo)):
-    """Lock patient from further matching operations."""
+    """Lock patient from further matching."""
     try:
         success = await patient_repo.lock_patient_matching(patient_uuid, reason)
         if success:
-            return {
-                "success": True,
-                "message": f"Patient {patient_uuid} matching locked",
-                "reason": reason
-            }
+            return {"success": True, "message": f"Patient {patient_uuid} locked successfully"}
         else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Patient not found"
-            )
-    except HTTPException:
-        raise
+            return {"success": False, "message": f"Failed to lock patient {patient_uuid}"}
     except Exception as e:
         logger.error(f"Error locking patient matching: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error locking patient matching: {str(e)}"
         )
 
 @app.post("/patient/{patient_uuid}/unlock")
 async def unlock_patient_matching(patient_uuid: str,
                                  patient_repo: PatientRepository = Depends(get_patient_repo)):
-    """Unlock patient matching operations."""
+    """Unlock patient matching."""
     try:
         success = await patient_repo.unlock_patient_matching(patient_uuid)
         if success:
-            return {
-                "success": True,
-                "message": f"Patient {patient_uuid} matching unlocked"
-            }
+            return {"success": True, "message": f"Patient {patient_uuid} unlocked successfully"}
         else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Patient not found"
-            )
-    except HTTPException:
-        raise
+            return {"success": False, "message": f"Failed to unlock patient {patient_uuid}"}
     except Exception as e:
         logger.error(f"Error unlocking patient matching: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error unlocking patient matching: {str(e)}"
         )
 
 @app.get("/")
@@ -906,9 +863,7 @@ async def root():
         "version": API_CONFIG["version"],
         "description": API_CONFIG["description"],
         "docs_url": "/docs",
-        "health_url": "/health",
-        "stats_url": "/stats",
-        "timestamp": datetime.now().isoformat()
+        "health_url": "/health"
     }
 
 if __name__ == "__main__":

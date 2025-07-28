@@ -17,23 +17,23 @@ export POSTGRES_DB=test_medical_system
 export POSTGRES_USER=test_user
 export POSTGRES_PASSWORD=test_password
 
-# HIS API test configuration
-export YOTTADB_API_BASE="http://test-yottadb.com"
-export FIREBIRD_API_BASE="http://test-firebird.com"
-export YOTTADB_TOKEN_URL="http://test-yottadb.com/oauth/token"
-export FIREBIRD_TOKEN_URL="http://test-firebird.com/oauth/token"
+# HIS API test configuration with REAL credentials
+export YOTTADB_API_BASE="http://192.168.156.43"
+export FIREBIRD_API_BASE="http://192.168.160.141"
+export YOTTADB_TOKEN_URL="http://192.168.156.43/token"
+export FIREBIRD_TOKEN_URL="http://192.168.160.141/token"
 
-# OAuth test credentials
-export YOTTADB_CLIENT_ID="test_yottadb_client"
-export YOTTADB_CLIENT_SECRET="test_yottadb_secret"
-export YOTTADB_USERNAME="test_yottadb_user"
-export YOTTADB_PASSWORD="test_yottadb_pass"
-export FIREBIRD_CLIENT_ID="test_firebird_client"
-export FIREBIRD_CLIENT_SECRET="test_firebird_secret"
-export FIREBIRD_USERNAME="test_firebird_user"
-export FIREBIRD_PASSWORD="test_firebird_pass"
+# OAuth test credentials - REAL credentials for testing
+export YOTTADB_CLIENT_ID="admin"
+export YOTTADB_CLIENT_SECRET="secret"
+export YOTTADB_USERNAME="admin"
+export YOTTADB_PASSWORD="secret"
+export FIREBIRD_CLIENT_ID="admin"
+export FIREBIRD_CLIENT_SECRET="secret"
+export FIREBIRD_USERNAME="admin"
+export FIREBIRD_PASSWORD="secret"
 
-# Mobile app configuration
+# Mobile app configuration - ENABLED for tests
 export MOBILE_APP_REGISTRATION_ENABLED=true
 export MOBILE_APP_AUTO_REGISTER=true
 export MOBILE_APP_REQUIRE_BOTH_HIS=false

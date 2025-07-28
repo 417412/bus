@@ -56,32 +56,42 @@ class TestPatientCreation:
 
 
 class TestCheckModifyPatientWithCreation:
-    """Tests for the main endpoint with patient creation - Fixed."""
+    """Tests for the main endpoint with patient creation - FIXED."""
     
     def test_patient_not_found_create_partial_success(self, client, mock_patient_repo_dependency, 
                                                      sample_patient_request):
         """Test patient creation with partial success - FIXED."""
-        with patch('src.api.main.get_patient_repository') as mock_get_repo:
-            mock_repo = Mock()
-            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
-            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
-            mock_get_repo.return_value = mock_repo
+        # Force mobile app registration to be enabled
+        with patch.dict(os.environ, {
+            "MOBILE_APP_REGISTRATION_ENABLED": "true",
+            "MOBILE_APP_AUTO_REGISTER": "true"
+        }):
+            # Force reload of config
+            from src.api import config
+            config.MOBILE_APP_CONFIG["registration_enabled"] = True
+            config.MOBILE_APP_CONFIG["auto_register_on_create"] = True
             
-            with patch('src.api.main.create_his_patient') as mock_create:
-                # FIXED: First succeeds with HIS number, second fails properly
-                mock_create.side_effect = [
-                    {"success": True, "hisnumber": "TEST123", "message": "Created successfully"},
-                    {"success": False, "error": "Creation failed"}
-                ]
+            with patch('src.api.main.get_patient_repository') as mock_get_repo:
+                mock_repo = Mock()
+                mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+                mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+                mock_get_repo.return_value = mock_repo
                 
-                response = client.post("/checkModifyPatient", json=sample_patient_request)
-                
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] == "partial"
-                assert data["action"] == "create"
-                assert "created in:" in data["message"]
-                assert "Failed:" in data["message"]
+                with patch('src.api.main.create_his_patient') as mock_create:
+                    # FIXED: First succeeds with proper dict format, second fails properly
+                    mock_create.side_effect = [
+                        {"success": True, "hisnumber": "TEST123", "message": "Created successfully"},
+                        {"success": False, "error": "Creation failed"}
+                    ]
+                    
+                    response = client.post("/checkModifyPatient", json=sample_patient_request)
+                    
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["success"] == "partial"
+                    assert data["action"] == "create"
+                    assert "created in:" in data["message"]
+                    assert "Failed:" in data["message"]
     
     def test_patient_not_found_create_failure(self, client, mock_patient_repo_dependency, 
                                             sample_patient_request):
@@ -92,7 +102,7 @@ class TestCheckModifyPatientWithCreation:
             mock_get_repo.return_value = mock_repo
             
             with patch('src.api.main.create_his_patient') as mock_create:
-                # FIXED: Both return failure properly
+                # FIXED: Both return failure properly in dict format
                 mock_create.return_value = {"success": False, "error": "Creation failed"}
                 
                 response = client.post("/checkModifyPatient", json=sample_patient_request)
@@ -103,46 +113,65 @@ class TestCheckModifyPatientWithCreation:
     
     def test_patient_not_found_create_success(self, client, mock_patient_repo_dependency, 
                                              sample_patient_request):
-        """Test patient creation when patient not found."""
-        with patch('src.api.main.get_patient_repository') as mock_get_repo:
-            mock_repo = Mock()
-            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
-            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
-            mock_get_repo.return_value = mock_repo
+        """Test patient creation when patient not found - FIXED."""
+        # Force mobile app registration to be enabled
+        with patch.dict(os.environ, {
+            "MOBILE_APP_REGISTRATION_ENABLED": "true",
+            "MOBILE_APP_AUTO_REGISTER": "true"
+        }):
+            # Force reload of config
+            from src.api import config
+            config.MOBILE_APP_CONFIG["registration_enabled"] = True
+            config.MOBILE_APP_CONFIG["auto_register_on_create"] = True
             
-            with patch('src.api.main.create_his_patient') as mock_create:
-                mock_create.return_value = {"success": True, "hisnumber": "TEST123", "message": "Created successfully"}
+            with patch('src.api.main.get_patient_repository') as mock_get_repo:
+                mock_repo = Mock()
+                mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+                mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+                mock_get_repo.return_value = mock_repo
                 
-                response = client.post("/checkModifyPatient", json=sample_patient_request)
-                
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] == "true"
-                assert data["action"] == "create"
-                assert "created successfully" in data["message"]
-                assert data["mobile_uuid"] == "test-mobile-uuid"
-                
-                # Verify create was called for both systems
-                assert mock_create.call_count == 2
+                with patch('src.api.main.create_his_patient') as mock_create:
+                    mock_create.return_value = {"success": True, "hisnumber": "TEST123", "message": "Created successfully"}
+                    
+                    response = client.post("/checkModifyPatient", json=sample_patient_request)
+                    
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["success"] == "true"
+                    assert data["action"] == "create"
+                    assert "created successfully" in data["message"]
+                    assert data["mobile_uuid"] == "test-mobile-uuid"
+                    
+                    # Verify create was called for both systems
+                    assert mock_create.call_count == 2
 
 
 class TestMobileAppUserRegistration:
-    """Tests for mobile app user registration."""
+    """Tests for mobile app user registration - FIXED."""
     
     @pytest.mark.asyncio
-    async def test_register_mobile_app_user_success(self, mock_environment):
-        """Test successful mobile app user registration."""
-        mock_repo = Mock()
-        mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
-        
-        result = await register_mobile_app_user_api(
-            hisnumber_qms="QMS123",
-            hisnumber_infoclinica="IC456",
-            patient_repo=mock_repo
-        )
-        
-        assert result == "test-mobile-uuid"
-        mock_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
+    async def test_register_mobile_app_user_success(self):
+        """Test successful mobile app user registration - FIXED."""
+        # Force mobile app registration to be enabled
+        with patch.dict(os.environ, {
+            "MOBILE_APP_REGISTRATION_ENABLED": "true"
+        }):
+            # Force reload of config
+            from src.api import config
+            config.MOBILE_APP_CONFIG["registration_enabled"] = True
+            
+            mock_repo = Mock()
+            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+            
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_repo
+            )
+            
+            assert result == "test-mobile-uuid"
+            mock_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
+
     
     @pytest.mark.asyncio
     async def test_register_mobile_app_user_no_his_numbers(self, mock_environment):
