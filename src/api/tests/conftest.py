@@ -3,6 +3,7 @@ Pytest configuration and fixtures for API tests.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import os
 import sys
@@ -17,8 +18,11 @@ from fastapi.testclient import TestClient
 from src.api.main import app, oauth_tokens
 from src.api.database import db_pool, PatientRepository
 
-@pytest.fixture(scope="session")
-def event_loop():
+# Configure pytest-asyncio
+pytest_plugins = ('pytest_asyncio',)
+
+@pytest_asyncio.fixture(scope="session")
+async def event_loop():
     """Create an instance of the default event loop for the test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop

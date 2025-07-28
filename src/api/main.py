@@ -18,7 +18,7 @@ sys.path.append(parent_dir)
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator  # Updated import
 import httpx
 import asyncio
 
@@ -59,7 +59,7 @@ if SECURITY_CONFIG["cors_enabled"]:
         allow_headers=["*"],
     )
 
-# Pydantic models
+# Pydantic models with V2 validators
 class PatientCredentialRequest(BaseModel):
     """Request model for patient credential operations."""
     lastname: str = Field(..., description="Patient's last name")
@@ -69,8 +69,9 @@ class PatientCredentialRequest(BaseModel):
     cllogin: str = Field(..., description="Patient's login")
     clpassword: str = Field(..., description="Patient's password")
     
-    @validator('bdate')
-    def validate_bdate(cls, v):
+    @field_validator('bdate')  # Updated to V2 style
+    @classmethod
+    def validate_bdate(cls, v: str) -> str:
         """Validate birth date format."""
         try:
             datetime.strptime(v, '%Y-%m-%d')
@@ -114,6 +115,7 @@ async def shutdown_event():
     logger.info("Shutting down Patient Credential Management API...")
     await close_database()
     logger.info("API shutdown completed")
+
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
     """
