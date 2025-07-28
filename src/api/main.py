@@ -157,32 +157,48 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
             
             logger.info(f"Requesting OAuth token from {his_type.upper()}: {token_url}")
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    token_url,
-                    data=oauth_data,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
-                )
-                
-                if response.status_code == 200:
-                    token_response = response.json()
-                    access_token = token_response.get("access_token")
-                    expires_in = token_response.get("expires_in", 3600)  # Default 1 hour
+            # ENHANCED: Better error handling and network configuration
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(30.0, connect=10.0),  # Separate connect timeout
+                    follow_redirects=True,  # Follow redirects automatically
+                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
+                ) as client:
+                    response = await client.post(
+                        token_url,
+                        data=oauth_data,
+                        headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    )
                     
-                    if access_token:
-                        # Cache the token with expiry buffer (subtract 5 minutes for safety)
-                        expiry_time = datetime.now() + timedelta(seconds=expires_in - 300)
-                        oauth_tokens[cache_key] = access_token
-                        oauth_tokens[cache_expiry_key] = expiry_time
+                    if response.status_code == 200:
+                        token_response = response.json()
+                        access_token = token_response.get("access_token")
+                        expires_in = token_response.get("expires_in", 3600)  # Default 1 hour
                         
-                        logger.info(f"Successfully obtained OAuth token for {his_type.upper()}, expires at {expiry_time}")
-                        return access_token
+                        if access_token:
+                            # Cache the token with expiry buffer (subtract 5 minutes for safety)
+                            expiry_time = datetime.now() + timedelta(seconds=expires_in - 300)
+                            oauth_tokens[cache_key] = access_token
+                            oauth_tokens[cache_expiry_key] = expiry_time
+                            
+                            logger.info(f"Successfully obtained OAuth token for {his_type.upper()}, expires at {expiry_time}")
+                            return access_token
+                        else:
+                            logger.error(f"OAuth response missing access_token for {his_type.upper()}")
+                            return None
                     else:
-                        logger.error(f"OAuth response missing access_token for {his_type.upper()}")
+                        logger.error(f"OAuth authentication failed for {his_type.upper()}: {response.status_code} - {response.text}")
                         return None
-                else:
-                    logger.error(f"OAuth authentication failed for {his_type.upper()}: {response.status_code} - {response.text}")
-                    return None
+                        
+            except httpx.ConnectError as e:
+                logger.error(f"Connection failed to {his_type.upper()} OAuth endpoint {token_url}: {e}")
+                return None
+            except httpx.TimeoutException as e:
+                logger.error(f"Timeout connecting to {his_type.upper()} OAuth endpoint {token_url}: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Network error getting OAuth token for {his_type.upper()}: {e}")
+                return None
                     
     except Exception as e:
         logger.error(f"Error getting OAuth token for {his_type.upper()}: {e}")
@@ -225,42 +241,56 @@ async def update_his_credentials(his_type: str, hisnumber: str, cllogin: str, cl
         logger.info(f"Updating {his_type.upper()} credentials for patient {hisnumber}")
         logger.debug(f"{his_type.upper()} update URL: {url}")
         
-        # Step 3: Make authenticated API call
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            
-            if response.status_code == 201:
-                logger.info(f"Successfully updated {his_type.upper()} credentials for patient {hisnumber}")
-                return True
-            elif response.status_code == 401:
-                # Token might be expired, clear cache and retry once
-                cache_key = f"{his_type}_token"
-                cache_expiry_key = f"{his_type}_token_expiry"
-                if cache_key in oauth_tokens:
-                    del oauth_tokens[cache_key]
-                if cache_expiry_key in oauth_tokens:
-                    del oauth_tokens[cache_expiry_key]
+        # Step 3: Make authenticated API call with enhanced error handling
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                follow_redirects=True
+            ) as client:
+                response = await client.post(url, json=payload, headers=headers)
                 
-                logger.warning(f"OAuth token expired for {his_type.upper()}, retrying with new token")
-                
-                # Get new token and retry
-                new_token = await get_oauth_token(his_type)
-                if new_token:
-                    headers["Authorization"] = f"Bearer {new_token}"
-                    retry_response = await client.post(url, json=payload, headers=headers)
+                if response.status_code == 201:
+                    logger.info(f"Successfully updated {his_type.upper()} credentials for patient {hisnumber}")
+                    return True
+                elif response.status_code == 401:
+                    # Token might be expired, clear cache and retry once
+                    cache_key = f"{his_type}_token"
+                    cache_expiry_key = f"{his_type}_token_expiry"
+                    if cache_key in oauth_tokens:
+                        del oauth_tokens[cache_key]
+                    if cache_expiry_key in oauth_tokens:
+                        del oauth_tokens[cache_expiry_key]
                     
-                    if retry_response.status_code == 201:
-                        logger.info(f"Successfully updated {his_type.upper()} credentials for patient {hisnumber} (retry)")
-                        return True
+                    logger.warning(f"OAuth token expired for {his_type.upper()}, retrying with new token")
+                    
+                    # Get new token and retry
+                    new_token = await get_oauth_token(his_type)
+                    if new_token:
+                        headers["Authorization"] = f"Bearer {new_token}"
+                        retry_response = await client.post(url, json=payload, headers=headers)
+                        
+                        if retry_response.status_code == 201:
+                            logger.info(f"Successfully updated {his_type.upper()} credentials for patient {hisnumber} (retry)")
+                            return True
+                        else:
+                            logger.error(f"{his_type.upper()} credential update failed on retry: {retry_response.status_code} - {retry_response.text}")
+                            return False
                     else:
-                        logger.error(f"{his_type.upper()} credential update failed on retry: {retry_response.status_code} - {retry_response.text}")
+                        logger.error(f"Failed to get new OAuth token for {his_type.upper()} retry")
                         return False
                 else:
-                    logger.error(f"Failed to get new OAuth token for {his_type.upper()} retry")
+                    logger.error(f"{his_type.upper()} credential update failed: {response.status_code} - {response.text}")
                     return False
-            else:
-                logger.error(f"{his_type.upper()} credential update failed: {response.status_code} - {response.text}")
-                return False
+                    
+        except httpx.ConnectError as e:
+            logger.error(f"Connection failed to {his_type.upper()} update endpoint: {e}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout updating {his_type.upper()} credentials: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Network error updating {his_type.upper()} credentials: {e}")
+            return False
                 
     except Exception as e:
         logger.error(f"Error updating {his_type.upper()} credentials for patient {hisnumber}: {e}")
@@ -306,71 +336,89 @@ async def create_his_patient(his_type: str, patient_data: PatientCredentialReque
         logger.info(f"Creating patient in {his_type.upper()}: {patient_data.lastname}, {patient_data.firstname}")
         logger.debug(f"{his_type.upper()} create URL: {url}")
         
-        # Step 3: Make authenticated API call
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            
-            if response.status_code == 201:
-                try:
-                    response_data = response.json()
-                    hisnumber = response_data.get("pcode")
-                    fullname = response_data.get("fullname", "")
-                    message = response_data.get("message", "Patient created successfully")
-                    
-                    logger.info(f"Successfully created patient in {his_type.upper()}: {fullname} (HIS#{hisnumber})")
-                    return {
-                        "success": True,
-                        "hisnumber": hisnumber,
-                        "fullname": fullname,
-                        "message": message
-                    }
-                except Exception as json_error:
-                    logger.warning(f"Failed to parse {his_type.upper()} response JSON, but creation was successful: {json_error}")
-                    return {"success": True, "message": "Patient created successfully"}
-                    
-            elif response.status_code == 401:
-                # Token might be expired, clear cache and retry once
-                cache_key = f"{his_type}_token"
-                cache_expiry_key = f"{his_type}_token_expiry"
-                if cache_key in oauth_tokens:
-                    del oauth_tokens[cache_key]
-                if cache_expiry_key in oauth_tokens:
-                    del oauth_tokens[cache_expiry_key]
+        # Step 3: Make authenticated API call with enhanced error handling
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                follow_redirects=True  # FIXED: This should handle the 307 redirect
+            ) as client:
+                response = await client.post(url, json=payload, headers=headers)
                 
-                logger.warning(f"OAuth token expired for {his_type.upper()}, retrying patient creation with new token")
-                
-                # Get new token and retry
-                new_token = await get_oauth_token(his_type)
-                if new_token:
-                    headers["Authorization"] = f"Bearer {new_token}"
-                    retry_response = await client.post(url, json=payload, headers=headers)
+                if response.status_code == 201:
+                    try:
+                        response_data = response.json()
+                        hisnumber = response_data.get("pcode")
+                        fullname = response_data.get("fullname", "")
+                        message = response_data.get("message", "Patient created successfully")
+                        
+                        logger.info(f"Successfully created patient in {his_type.upper()}: {fullname} (HIS#{hisnumber})")
+                        return {
+                            "success": True,
+                            "hisnumber": hisnumber,
+                            "fullname": fullname,
+                            "message": message
+                        }
+                    except Exception as json_error:
+                        logger.warning(f"Failed to parse {his_type.upper()} response JSON, but creation was successful: {json_error}")
+                        return {"success": True, "message": "Patient created successfully"}
+                        
+                elif response.status_code == 401:
+                    # Token might be expired, clear cache and retry once
+                    cache_key = f"{his_type}_token"
+                    cache_expiry_key = f"{his_type}_token_expiry"
+                    if cache_key in oauth_tokens:
+                        del oauth_tokens[cache_key]
+                    if cache_expiry_key in oauth_tokens:
+                        del oauth_tokens[cache_expiry_key]
                     
-                    if retry_response.status_code == 201:
-                        try:
-                            retry_data = retry_response.json()
-                            hisnumber = retry_data.get("pcode")
-                            fullname = retry_data.get("fullname", "")
-                            message = retry_data.get("message", "Patient created successfully")
-                            
-                            logger.info(f"Successfully created patient in {his_type.upper()} (retry): {fullname} (HIS#{hisnumber})")
-                            return {
-                                "success": True,
-                                "hisnumber": hisnumber,
-                                "fullname": fullname,
-                                "message": message
-                            }
-                        except Exception as json_error:
-                            logger.warning(f"Failed to parse {his_type.upper()} retry response JSON, but creation was successful: {json_error}")
-                            return {"success": True, "message": "Patient created successfully (retry)"}
+                    logger.warning(f"OAuth token expired for {his_type.upper()}, retrying patient creation with new token")
+                    
+                    # Get new token and retry
+                    new_token = await get_oauth_token(his_type)
+                    if new_token:
+                        headers["Authorization"] = f"Bearer {new_token}"
+                        retry_response = await client.post(url, json=payload, headers=headers)
+                        
+                        if retry_response.status_code == 201:
+                            try:
+                                retry_data = retry_response.json()
+                                hisnumber = retry_data.get("pcode")
+                                fullname = retry_data.get("fullname", "")
+                                message = retry_data.get("message", "Patient created successfully")
+                                
+                                logger.info(f"Successfully created patient in {his_type.upper()} (retry): {fullname} (HIS#{hisnumber})")
+                                return {
+                                    "success": True,
+                                    "hisnumber": hisnumber,
+                                    "fullname": fullname,
+                                    "message": message
+                                }
+                            except Exception as json_error:
+                                logger.warning(f"Failed to parse {his_type.upper()} retry response JSON, but creation was successful: {json_error}")
+                                return {"success": True, "message": "Patient created successfully (retry)"}
+                        else:
+                            logger.error(f"{his_type.upper()} patient creation failed on retry: {retry_response.status_code} - {retry_response.text}")
+                            return {"success": False, "error": f"Creation failed on retry: {retry_response.status_code}"}
                     else:
-                        logger.error(f"{his_type.upper()} patient creation failed on retry: {retry_response.status_code} - {retry_response.text}")
-                        return {"success": False, "error": f"Creation failed on retry: {retry_response.status_code}"}
+                        logger.error(f"Failed to get new OAuth token for {his_type.upper()} patient creation retry")
+                        return {"success": False, "error": "Failed to refresh OAuth token"}
+                elif response.status_code == 307:
+                    # This shouldn't happen with follow_redirects=True, but just in case
+                    logger.error(f"{his_type.upper()} returned redirect (307) - this should be handled automatically")
+                    return {"success": False, "error": "Redirect not followed properly"}
                 else:
-                    logger.error(f"Failed to get new OAuth token for {his_type.upper()} patient creation retry")
-                    return {"success": False, "error": "Failed to refresh OAuth token"}
-            else:
-                logger.error(f"{his_type.upper()} patient creation failed: {response.status_code} - {response.text}")
-                return {"success": False, "error": f"Creation failed: {response.status_code} - {response.text}"}
+                    logger.error(f"{his_type.upper()} patient creation failed: {response.status_code} - {response.text}")
+                    return {"success": False, "error": f"Creation failed: {response.status_code} - {response.text}"}
+                    
+        except httpx.ConnectError as e:
+            logger.error(f"Connection failed to {his_type.upper()} create endpoint: {e}")
+            return {"success": False, "error": f"Connection failed: {str(e)}"}
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout creating patient in {his_type.upper()}: {e}")
+            return {"success": False, "error": f"Timeout: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Network error creating patient in {his_type.upper()}: {e}")
+            return {"success": False, "error": f"Network error: {str(e)}"}
                 
     except Exception as e:
         logger.error(f"Error creating patient in {his_type.upper()}: {e}")
