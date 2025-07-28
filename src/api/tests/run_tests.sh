@@ -1,7 +1,4 @@
 #!/bin/bash
-"""
-Script to run all API tests with updated architecture - FIXED VERSION.
-"""
 
 echo "Running API tests with updated architecture..."
 
