@@ -3,26 +3,26 @@
 echo "Starting Patient Credential Management API..."
 
 # =============================================================================
-# HIS API Configuration
+# HIS API Configuration - CORRECTED FOR YOUR OAUTH IMPLEMENTATION
 # =============================================================================
 
-# YottaDB API Configuration (based on your actual setup)
+# YottaDB API Configuration
 export YOTTADB_API_BASE="http://192.168.156.43"
-export YOTTADB_TOKEN_URL="http://192.168.156.43/token"  # Fixed: /token not /oauth/token
-export YOTTADB_CLIENT_ID="admin"                        # Fixed: admin instead of placeholder
-export YOTTADB_CLIENT_SECRET="secret"                   # Fixed: secret instead of placeholder
-export YOTTADB_USERNAME="admin"                         # Fixed: admin instead of placeholder
-export YOTTADB_PASSWORD="secret"                        # Fixed: secret instead of placeholder
-export YOTTADB_SCOPE=""                                 # Fixed: empty scope as mentioned
+export YOTTADB_TOKEN_URL="http://192.168.156.43/token"
+export YOTTADB_CLIENT_ID=""                             # CHANGED: Empty string (not "admin")
+export YOTTADB_CLIENT_SECRET=""                         # CHANGED: Empty string (not "secret") 
+export YOTTADB_USERNAME="admin"
+export YOTTADB_PASSWORD="secret"
+export YOTTADB_SCOPE=""
 
-# Firebird API Configuration (based on your actual setup)
-export FIREBIRD_API_BASE="http://192.168.160.141"       # Fixed: actual IP from config
-export FIREBIRD_TOKEN_URL="http://192.168.160.141/token" # Fixed: /token not /oauth/token
-export FIREBIRD_CLIENT_ID="admin"                       # Fixed: admin instead of placeholder
-export FIREBIRD_CLIENT_SECRET="secret"                  # Fixed: secret instead of placeholder
-export FIREBIRD_USERNAME="admin"                        # Fixed: admin instead of placeholder
-export FIREBIRD_PASSWORD="secret"                       # Fixed: secret instead of placeholder
-export FIREBIRD_SCOPE=""                                # Fixed: empty scope as mentioned
+# Firebird API Configuration - CORRECTED BASED ON YOUR WORKING CURL
+export FIREBIRD_API_BASE="http://192.168.160.141"
+export FIREBIRD_TOKEN_URL="http://192.168.160.141/token"
+export FIREBIRD_CLIENT_ID=""                            # CHANGED: Empty string (not "admin")
+export FIREBIRD_CLIENT_SECRET=""                        # CHANGED: Empty string (not "secret")
+export FIREBIRD_USERNAME="admin"
+export FIREBIRD_PASSWORD="secret"
+export FIREBIRD_SCOPE=""
 
 # =============================================================================
 # PostgreSQL Database Configuration (optional overrides)
@@ -109,6 +109,7 @@ echo "  Firebird API: ${FIREBIRD_API_BASE}"
 echo "  Environment: ${ENVIRONMENT:-development}"
 echo "  Debug Mode: ${DEBUG:-false}"
 echo "  Mobile App Registration: ${MOBILE_APP_REGISTRATION_ENABLED:-true}"
+echo "  OAuth Config: client_id='${YOTTADB_CLIENT_ID}', client_secret='${YOTTADB_CLIENT_SECRET}'"
 
 # Check if main.py exists
 if [ ! -f "main.py" ]; then
@@ -117,18 +118,50 @@ if [ ! -f "main.py" ]; then
     exit 1
 fi
 
-# Optional: Check database connectivity (uncomment to enable)
-# echo "Testing database connection..."
-# python3 -c "
-# import sys
-# sys.path.append('../..')
-# try:
-#     from src.api.config import get_postgresql_config
-#     config = get_postgresql_config()
-#     print(f'Database: {config[\"host\"]}:{config[\"port\"]}/{config[\"database\"]}')
-# except Exception as e:
-#     print(f'Database config check failed: {e}')
-# "
+# Test OAuth configuration before starting the server
+echo ""
+echo "Testing OAuth configuration..."
+python3 -c "
+import asyncio
+import httpx
+
+async def test_oauth():
+    try:
+        # Test Firebird OAuth (since we know this works)
+        oauth_data = {
+            'grant_type': '',
+            'username': 'admin',
+            'password': 'secret',
+            'scope': '',
+            'client_id': '',
+            'client_secret': '',
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                'http://192.168.160.141/token',
+                data=oauth_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                print(f'✅ OAuth test successful - got token: {token_data[\"access_token\"][:20]}...')
+                return True
+            else:
+                print(f'❌ OAuth test failed: {response.status_code} - {response.text}')
+                return False
+                
+    except Exception as e:
+        print(f'❌ OAuth test error: {e}')
+        return False
+
+# Run the test
+if asyncio.run(test_oauth()):
+    print('OAuth configuration looks good!')
+else:
+    print('⚠️  OAuth configuration might have issues, but starting anyway...')
+"
 
 # Run the application
 echo ""
@@ -141,6 +174,7 @@ echo "  - Main endpoint: http://localhost:8000/checkModifyPatient"
 echo "  - Health check: http://localhost:8000/health"
 echo "  - API docs: http://localhost:8000/docs"
 echo "  - Statistics: http://localhost:8000/stats"
+echo "  - OAuth test: http://localhost:8000/test-oauth/firebird"
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""

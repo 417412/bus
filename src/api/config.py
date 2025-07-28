@@ -60,7 +60,6 @@ def get_postgresql_config():
         "command_timeout": int(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60"))
     }
 
-# HIS System API Endpoints with OAuth Configuration (corrected based on your setup)
 HIS_API_CONFIG = {
     "yottadb": {
         "base_url": os.getenv("YOTTADB_API_BASE", "http://192.168.156.43"),
@@ -68,11 +67,11 @@ HIS_API_CONFIG = {
         "create_endpoint": "/createPatients",
         "oauth": {
             "token_url": os.getenv("YOTTADB_TOKEN_URL", "http://192.168.156.43/token"),
-            "client_id": os.getenv("YOTTADB_CLIENT_ID", "admin"),
-            "client_secret": os.getenv("YOTTADB_CLIENT_SECRET", "secret"),
+            "client_id": os.getenv("YOTTADB_CLIENT_ID", ""),  # Empty string
+            "client_secret": os.getenv("YOTTADB_CLIENT_SECRET", ""),  # Empty string
             "username": os.getenv("YOTTADB_USERNAME", "admin"),
             "password": os.getenv("YOTTADB_PASSWORD", "secret"),
-            "scope": os.getenv("YOTTADB_SCOPE", "")  # Empty scope as you mentioned
+            "scope": os.getenv("YOTTADB_SCOPE", "")  # Empty string
         }
     },
     "firebird": {
@@ -81,11 +80,11 @@ HIS_API_CONFIG = {
         "create_endpoint": "/createPatients",
         "oauth": {
             "token_url": os.getenv("FIREBIRD_TOKEN_URL", "http://192.168.160.141/token"),
-            "client_id": os.getenv("FIREBIRD_CLIENT_ID", "admin"),
-            "client_secret": os.getenv("FIREBIRD_CLIENT_SECRET", "secret"),
+            "client_id": os.getenv("FIREBIRD_CLIENT_ID", ""),  # Empty string
+            "client_secret": os.getenv("FIREBIRD_CLIENT_SECRET", ""),  # Empty string
             "username": os.getenv("FIREBIRD_USERNAME", "admin"),
             "password": os.getenv("FIREBIRD_PASSWORD", "secret"),
-            "scope": os.getenv("FIREBIRD_SCOPE", "")  # Empty scope as you mentioned
+            "scope": os.getenv("FIREBIRD_SCOPE", "")  # Empty string
         }
     }
 }

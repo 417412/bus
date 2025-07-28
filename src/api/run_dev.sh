@@ -3,22 +3,22 @@
 echo "Starting Patient Credential Management API in DEVELOPMENT mode..."
 
 # =============================================================================
-# Development Configuration
+# Development Configuration - CORRECTED FOR YOUR OAUTH IMPLEMENTATION
 # =============================================================================
 
-# HIS API Configuration (same as production but with debug)
+# HIS API Configuration
 export YOTTADB_API_BASE="http://192.168.156.43"
 export YOTTADB_TOKEN_URL="http://192.168.156.43/token"
-export YOTTADB_CLIENT_ID="admin"
-export YOTTADB_CLIENT_SECRET="secret"
+export YOTTADB_CLIENT_ID=""                             # CHANGED: Empty string
+export YOTTADB_CLIENT_SECRET=""                         # CHANGED: Empty string
 export YOTTADB_USERNAME="admin"
 export YOTTADB_PASSWORD="secret"
 export YOTTADB_SCOPE=""
 
 export FIREBIRD_API_BASE="http://192.168.160.141"
 export FIREBIRD_TOKEN_URL="http://192.168.160.141/token"
-export FIREBIRD_CLIENT_ID="admin"
-export FIREBIRD_CLIENT_SECRET="secret"
+export FIREBIRD_CLIENT_ID=""                            # CHANGED: Empty string
+export FIREBIRD_CLIENT_SECRET=""                        # CHANGED: Empty string
 export FIREBIRD_USERNAME="admin"
 export FIREBIRD_PASSWORD="secret"
 export FIREBIRD_SCOPE=""
@@ -58,6 +58,31 @@ if [ ! -f "main.py" ]; then
     exit 1
 fi
 
+# Install dependencies if needed
+if [ ! -f "venv/bin/activate" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+else
+    source venv/bin/activate
+fi
+
+# Quick OAuth test in development mode
+echo "Quick OAuth test..."
+python3 -c "
+import asyncio, httpx
+async def quick_test():
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post('http://192.168.160.141/token', 
+                data={'grant_type': '', 'username': 'admin', 'password': 'secret', 
+                      'scope': '', 'client_id': '', 'client_secret': ''})
+            print(f'OAuth quick test: {\"✅ OK\" if response.status_code == 200 else \"❌ FAIL\"}')
+    except: print('OAuth quick test: ⚠️  Network issue')
+asyncio.run(quick_test())
+"
+
 # Use uvicorn directly for development (with auto-reload)
 if command -v uvicorn &> /dev/null; then
     echo "Running with uvicorn (auto-reload enabled)..."
@@ -65,10 +90,17 @@ if command -v uvicorn &> /dev/null; then
     echo "Development server starting at:"
     echo "  - http://localhost:8000/docs (Swagger UI)"
     echo "  - http://localhost:8000/checkModifyPatient (Main endpoint)"
+    echo "  - http://localhost:8000/test-oauth/firebird (Test OAuth)"
     echo ""
     
+    # Run with uvicorn for auto-reload
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
 else
-    echo "uvicorn not found, using python directly..."
-    python3 main.py
+    echo "uvicorn not found, installing..."
+    pip install uvicorn[standard]
+    echo "Now running with uvicorn..."
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
 fi
+
+# Deactivate virtual environment when done
+deactivate

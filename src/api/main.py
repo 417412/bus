@@ -145,18 +145,15 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
             config = HIS_API_CONFIG[his_type]["oauth"]
             token_url = config["token_url"]
             
-            # Prepare OAuth request data
+            # Prepare OAuth request data - FIXED to match your working curl
             oauth_data = {
-                "grant_type": "password",
+                "grant_type": "",  # Empty as in your curl
                 "username": config["username"],
-                "password": config["password"],
-                "client_id": config["client_id"],
-                "client_secret": config["client_secret"],
+                "password": config["password"], 
+                "scope": "",  # Empty as in your curl
+                "client_id": "",  # Empty as in your curl
+                "client_secret": "",  # Empty as in your curl
             }
-            
-            # Add scope if specified and not empty
-            if config.get("scope"):
-                oauth_data["scope"] = config["scope"]
             
             logger.info(f"Requesting OAuth token from {his_type.upper()}: {token_url}")
             
