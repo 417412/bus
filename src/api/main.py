@@ -114,6 +114,7 @@ class PatientResponse(BaseModel):
 
 # Global OAuth token cache
 oauth_tokens = {}
+oauth_locks = {}  # Per-system locks
 
 # Dependency to get patient repository
 def get_patient_repo() -> PatientRepository:
@@ -145,72 +146,71 @@ async def shutdown_event():
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
     """
-    Get OAuth token for specified HIS system.
+    Get OAuth token for specified HIS system with proper concurrency control.
     Uses token caching to avoid repeated authentication.
-    
-    Args:
-        his_type: 'yottadb' or 'firebird'
-        
-    Returns:
-        Access token string or None if authentication failed
     """
     try:
-        # Check if we have a valid cached token
-        cache_key = f"{his_type}_token"
-        cache_expiry_key = f"{his_type}_token_expiry"
+        # Get or create a lock for this HIS system
+        if his_type not in oauth_locks:
+            oauth_locks[his_type] = asyncio.Lock()
         
-        if (cache_key in oauth_tokens and 
-            cache_expiry_key in oauth_tokens and 
-            datetime.now() < oauth_tokens[cache_expiry_key]):
-            logger.debug(f"Using cached OAuth token for {his_type.upper()}")
-            return oauth_tokens[cache_key]
-        
-        # Get new token
-        config = HIS_API_CONFIG[his_type]["oauth"]
-        token_url = config["token_url"]
-        
-        # Prepare OAuth request data
-        oauth_data = {
-            "grant_type": "password",
-            "username": config["username"],
-            "password": config["password"],
-            "client_id": config["client_id"],
-            "client_secret": config["client_secret"],
-        }
-        
-        # Add scope if specified
-        if config.get("scope"):
-            oauth_data["scope"] = config["scope"]
-        
-        logger.info(f"Requesting OAuth token from {his_type.upper()}: {token_url}")
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                token_url,
-                data=oauth_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
+        async with oauth_locks[his_type]:
+            # Check if we have a valid cached token (inside the lock)
+            cache_key = f"{his_type}_token"
+            cache_expiry_key = f"{his_type}_token_expiry"
             
-            if response.status_code == 200:
-                token_response = response.json()
-                access_token = token_response.get("access_token")
-                expires_in = token_response.get("expires_in", 3600)  # Default 1 hour
+            if (cache_key in oauth_tokens and 
+                cache_expiry_key in oauth_tokens and 
+                datetime.now() < oauth_tokens[cache_expiry_key]):
+                logger.debug(f"Using cached OAuth token for {his_type.upper()}")
+                return oauth_tokens[cache_key]
+            
+            # Get new token (still inside the lock)
+            config = HIS_API_CONFIG[his_type]["oauth"]
+            token_url = config["token_url"]
+            
+            # Prepare OAuth request data
+            oauth_data = {
+                "grant_type": "password",
+                "username": config["username"],
+                "password": config["password"],
+                "client_id": config["client_id"],
+                "client_secret": config["client_secret"],
+            }
+            
+            # Add scope if specified and not empty
+            if config.get("scope"):
+                oauth_data["scope"] = config["scope"]
+            
+            logger.info(f"Requesting OAuth token from {his_type.upper()}: {token_url}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    token_url,
+                    data=oauth_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
                 
-                if access_token:
-                    # Cache the token with expiry buffer (subtract 5 minutes for safety)
-                    expiry_time = datetime.now() + timedelta(seconds=expires_in - 300)
-                    oauth_tokens[cache_key] = access_token
-                    oauth_tokens[cache_expiry_key] = expiry_time
+                if response.status_code == 200:
+                    token_response = response.json()
+                    access_token = token_response.get("access_token")
+                    expires_in = token_response.get("expires_in", 3600)  # Default 1 hour
                     
-                    logger.info(f"Successfully obtained OAuth token for {his_type.upper()}, expires at {expiry_time}")
-                    return access_token
+                    if access_token:
+                        # Cache the token with expiry buffer (subtract 5 minutes for safety)
+                        expiry_time = datetime.now() + timedelta(seconds=expires_in - 300)
+                        oauth_tokens[cache_key] = access_token
+                        oauth_tokens[cache_expiry_key] = expiry_time
+                        
+                        logger.info(f"Successfully obtained OAuth token for {his_type.upper()}, expires at {expiry_time}")
+                        return access_token
+                    else:
+                        logger.error(f"OAuth response missing access_token for {his_type.upper()}")
+                        return None
                 else:
-                    logger.error(f"OAuth response missing access_token for {his_type.upper()}")
+                    logger.error(f"OAuth authentication failed for {his_type.upper()}: {response.status_code} - {response.text}")
                     return None
-            else:
-                logger.error(f"OAuth authentication failed for {his_type.upper()}: {response.status_code} - {response.text}")
-                return None
-                
+                    
     except Exception as e:
         logger.error(f"Error getting OAuth token for {his_type.upper()}: {e}")
         return None
