@@ -132,30 +132,47 @@ def setup_api_logger(name: str, level: str = None):
     if logger.handlers:
         return logger
     
-    log_level = level or "INFO"
+    log_level = level or os.getenv("LOG_LEVEL", "INFO")
     logger.setLevel(getattr(logging, log_level))
     
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     
-    # Ensure log directory exists
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True, parents=True)
+    # FIXED: Use systemd logging or fallback to /tmp
+    # Since systemd handles logging via StandardOutput/StandardError, 
+    # we don't need file handlers when running as a service
+    environment = os.getenv("ENVIRONMENT", "development")
     
-    # File handler
-    file_handler = RotatingFileHandler(
-        log_dir / f"{name}.log",
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setLevel(getattr(logging, log_level))
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(getattr(logging, log_level))
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    if environment == "production" and os.getenv("JOURNAL_STREAM"):
+        # Running under systemd, use console logging only
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(getattr(logging, log_level))
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    else:
+        # Try to create log directory, fallback to /tmp if permission denied
+        try:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True, parents=True)
+        except PermissionError:
+            # Fallback to /tmp for development/testing
+            log_dir = Path("/tmp/patient_api_logs")
+            log_dir.mkdir(exist_ok=True, parents=True)
+        
+        # File handler
+        file_handler = RotatingFileHandler(
+            log_dir / f"{name}.log",
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5
+        )
+        file_handler.setLevel(getattr(logging, log_level))
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(getattr(logging, log_level))
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     logger.propagate = False
     return logger
@@ -187,11 +204,18 @@ def validate_config():
         if oauth_config.get("username") == "admin":
             issues.append(f"{his_name.upper()} OAuth username should be changed from default 'admin' for production")
     
-    # Check required directories
-    log_dir = Path("logs")
-    if not log_dir.exists():
+    # FIXED: Only check/create log directory if not running under systemd
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment != "production" or not os.getenv("JOURNAL_STREAM"):
+        # Check required directories only in development
         try:
-            log_dir.mkdir(parents=True, exist_ok=True)
+            log_dir = Path("logs")
+            if not log_dir.exists():
+                log_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # This is acceptable in production with systemd
+            if environment != "production":
+                issues.append("Cannot create logs directory (using /tmp fallback)")
         except Exception as e:
             issues.append(f"Cannot create logs directory: {e}")
     
