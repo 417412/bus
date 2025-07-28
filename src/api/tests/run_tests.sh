@@ -1,5 +1,7 @@
 #!/bin/bash
-#Script to run all API tests with different configurations.
+"""
+Script to run all API tests with updated architecture - FIXED VERSION.
+"""
 
 echo "Running API tests with updated architecture..."
 
@@ -9,7 +11,7 @@ mkdir -p logs
 # Set test environment variables
 export ENVIRONMENT=testing
 export DEBUG=true
-export LOG_LEVEL=DEBUG
+export LOG_LEVEL=WARNING  # Reduce log noise in tests
 
 # Database test configuration
 export POSTGRES_HOST=localhost
@@ -41,28 +43,28 @@ export MOBILE_APP_REQUIRE_BOTH_HIS=false
 
 # Run basic tests
 echo "Running basic tests..."
-python3 -m pytest src/api/tests/test_main.py -v --tb=short
+python3 -m pytest src/api/tests/test_main.py -v --tb=short -W ignore::DeprecationWarning
 
 # Run patient creation tests
 echo "Running patient creation tests..."
-python3 -m pytest src/api/tests/test_patient_creation.py -v --tb=short
+python3 -m pytest src/api/tests/test_patient_creation.py -v --tb=short -W ignore::DeprecationWarning
 
 # Run integration tests if they exist
 if [ -f "src/api/tests/test_integration.py" ]; then
     echo "Running integration tests..."
-    python3 -m pytest src/api/tests/test_integration.py -v --tb=short
+    python3 -m pytest src/api/tests/test_integration.py -v --tb=short -W ignore::DeprecationWarning
 fi
 
 # Run OAuth tests if they exist
 if [ -f "src/api/tests/test_oauth.py" ]; then
     echo "Running OAuth tests..."
-    python3 -m pytest src/api/tests/test_oauth.py -v --tb=short
+    python3 -m pytest src/api/tests/test_oauth.py -v --tb=short -W ignore::DeprecationWarning
 fi
 
 # Run performance tests (excluding slow tests by default)
 if [ -f "src/api/tests/test_performance.py" ]; then
     echo "Running performance tests..."
-    python3 -m pytest src/api/tests/test_performance.py -v -m "not slow" --tb=short
+    python3 -m pytest src/api/tests/test_performance.py -v -m "not slow" --tb=short -W ignore::DeprecationWarning
 fi
 
 # Run all tests with coverage
@@ -73,13 +75,14 @@ python3 -m pytest src/api/tests/ \
     --cov=src.api.config \
     --cov-report=html \
     --cov-report=term \
-    -v --tb=short
+    -v --tb=short \
+    -W ignore::DeprecationWarning
 
 # Run slow tests separately if requested
 if [ "$1" = "--include-slow" ]; then
     echo "Running slow/stress tests..."
     if [ -f "src/api/tests/test_performance.py" ]; then
-        python3 -m pytest src/api/tests/test_performance.py -v -m "slow" --tb=short
+        python3 -m pytest src/api/tests/test_performance.py -v -m "slow" --tb=short -W ignore::DeprecationWarning
     fi
 fi
 

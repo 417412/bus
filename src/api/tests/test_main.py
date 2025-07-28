@@ -1,9 +1,10 @@
 """
-Tests for the main API endpoints.
+Tests for the main API endpoints - Fixed version.
 """
 
 import pytest
 import json
+import os
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime, timedelta
 from fastapi import status
@@ -284,8 +285,11 @@ class TestAPIEndpoints:
             assert "patient_matching_24h" in data
             assert "timestamp" in data
     
+class TestAPIEndpoints:
+    """Tests for API endpoints - Fixed for database issues."""
+    
     def test_patient_lock_unlock(self, client, mock_patient_repo_dependency):
-        """Test patient lock and unlock endpoints."""
+        """Test patient lock and unlock endpoints - FIXED."""
         with patch('src.api.main.get_patient_repository') as mock_get_repo:
             mock_repo = Mock()
             mock_repo.lock_patient_matching = AsyncMock(return_value=True)

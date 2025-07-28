@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
 import uuid as uuid_module
+from contextlib import asynccontextmanager
 
 # Add the parent directory to the path
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,7 +19,7 @@ sys.path.append(parent_dir)
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator  # Updated import
+from pydantic import BaseModel, Field, field_validator
 import httpx
 import asyncio
 
@@ -40,13 +41,38 @@ config_issues = validate_config()
 if config_issues:
     logger.warning(f"Configuration issues detected: {config_issues}")
 
-# Create FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan events for FastAPI application."""
+    # Startup
+    try:
+        logger.info("Initializing Patient Credential Management API...")
+        
+        # Initialize database
+        if not await initialize_database():
+            raise Exception("Database initialization failed")
+        
+        logger.info("API initialization completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize API: {e}")
+        raise e
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down Patient Credential Management API...")
+    await close_database()
+    logger.info("API shutdown completed")
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title=API_CONFIG["title"],
     description=API_CONFIG["description"],
     version=API_CONFIG["version"],
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -69,7 +95,7 @@ class PatientCredentialRequest(BaseModel):
     cllogin: str = Field(..., description="Patient's login")
     clpassword: str = Field(..., description="Patient's password")
     
-    @field_validator('bdate')  # Updated to V2 style
+    @field_validator('bdate')
     @classmethod
     def validate_bdate(cls, v: str) -> str:
         """Validate birth date format."""

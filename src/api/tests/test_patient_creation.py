@@ -1,8 +1,8 @@
 """
-Tests for patient creation functionality.
+Tests for patient creation functionality - Fixed version.
 """
-
 import pytest
+import os
 from unittest.mock import patch, AsyncMock, Mock
 from fastapi import status
 
@@ -56,35 +56,11 @@ class TestPatientCreation:
 
 
 class TestCheckModifyPatientWithCreation:
-    """Tests for the main endpoint with patient creation."""
-    
-    def test_patient_not_found_create_success(self, client, mock_patient_repo_dependency, 
-                                             sample_patient_request):
-        """Test patient creation when patient not found."""
-        with patch('src.api.main.get_patient_repository') as mock_get_repo:
-            mock_repo = Mock()
-            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
-            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
-            mock_get_repo.return_value = mock_repo
-            
-            with patch('src.api.main.create_his_patient') as mock_create:
-                mock_create.return_value = create_mock_patient_creation_response(True, "TEST123")
-                
-                response = client.post("/checkModifyPatient", json=sample_patient_request)
-                
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] == "true"
-                assert data["action"] == "create"
-                assert "created successfully" in data["message"]
-                assert data["mobile_uuid"] == "test-mobile-uuid"
-                
-                # Verify create was called for both systems
-                assert mock_create.call_count == 2
+    """Tests for the main endpoint with patient creation - Fixed."""
     
     def test_patient_not_found_create_partial_success(self, client, mock_patient_repo_dependency, 
                                                      sample_patient_request):
-        """Test patient creation with partial success."""
+        """Test patient creation with partial success - FIXED."""
         with patch('src.api.main.get_patient_repository') as mock_get_repo:
             mock_repo = Mock()
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
@@ -92,10 +68,10 @@ class TestCheckModifyPatientWithCreation:
             mock_get_repo.return_value = mock_repo
             
             with patch('src.api.main.create_his_patient') as mock_create:
-                # First succeeds, second fails
+                # FIXED: First succeeds with HIS number, second fails properly
                 mock_create.side_effect = [
-                    create_mock_patient_creation_response(True, "TEST123"),
-                    create_mock_patient_creation_response(False)
+                    {"success": True, "hisnumber": "TEST123", "message": "Created successfully"},
+                    {"success": False, "error": "Creation failed"}
                 ]
                 
                 response = client.post("/checkModifyPatient", json=sample_patient_request)
@@ -109,20 +85,45 @@ class TestCheckModifyPatientWithCreation:
     
     def test_patient_not_found_create_failure(self, client, mock_patient_repo_dependency, 
                                             sample_patient_request):
-        """Test patient creation when all creations fail."""
+        """Test patient creation when all creations fail - FIXED."""
         with patch('src.api.main.get_patient_repository') as mock_get_repo:
             mock_repo = Mock()
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
             mock_get_repo.return_value = mock_repo
             
             with patch('src.api.main.create_his_patient') as mock_create:
-                mock_create.return_value = create_mock_patient_creation_response(False)
+                # FIXED: Both return failure properly
+                mock_create.return_value = {"success": False, "error": "Creation failed"}
                 
                 response = client.post("/checkModifyPatient", json=sample_patient_request)
                 
                 assert response.status_code == 502
                 data = response.json()
                 assert "Failed to create patient" in data["detail"]
+    
+    def test_patient_not_found_create_success(self, client, mock_patient_repo_dependency, 
+                                             sample_patient_request):
+        """Test patient creation when patient not found."""
+        with patch('src.api.main.get_patient_repository') as mock_get_repo:
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+            mock_repo.register_mobile_app_user = AsyncMock(return_value="test-mobile-uuid")
+            mock_get_repo.return_value = mock_repo
+            
+            with patch('src.api.main.create_his_patient') as mock_create:
+                mock_create.return_value = {"success": True, "hisnumber": "TEST123", "message": "Created successfully"}
+                
+                response = client.post("/checkModifyPatient", json=sample_patient_request)
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] == "true"
+                assert data["action"] == "create"
+                assert "created successfully" in data["message"]
+                assert data["mobile_uuid"] == "test-mobile-uuid"
+                
+                # Verify create was called for both systems
+                assert mock_create.call_count == 2
 
 
 class TestMobileAppUserRegistration:

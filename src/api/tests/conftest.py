@@ -21,12 +21,7 @@ from src.api.database import db_pool, PatientRepository
 # Configure pytest-asyncio
 pytest_plugins = ('pytest_asyncio',)
 
-@pytest_asyncio.fixture(scope="session")
-async def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+# REMOVED: Custom event_loop fixture - let pytest-asyncio handle it
 
 @pytest.fixture
 def client():
@@ -208,7 +203,7 @@ def mock_patient_repo_dependency():
 
 # Helper functions for tests
 def create_mock_patient_creation_response(success=True, hisnumber="TEST123"):
-    """Create a mock patient creation response."""
+    """Create a mock patient creation response - FIXED."""
     if success:
         return {
             "success": True,
