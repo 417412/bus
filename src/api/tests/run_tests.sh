@@ -79,7 +79,7 @@ python3 -m pytest src/api/tests/ \
 if [ "$1" = "--include-slow" ]; then
     echo "Running slow/stress tests..."
     if [ -f "src/api/tests/test_performance.py" ]; then
-        python3 -m pytest src/api/tests/test_performance.py -v -m "slow" --tb=short -W ignore::DeprecationWarning
+        python3 -m pytest src/api/tests/test_performance.py -v --run-slow --tb=short -W ignore::DeprecationWarning
     fi
 fi
 
