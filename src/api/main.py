@@ -6,7 +6,7 @@ Provides endpoints for checking and modifying patient credentials across HIS sys
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Dict, Any
 import logging
 import uuid as uuid_module
