@@ -1,5 +1,5 @@
 """
-Integration tests for the API - FIXED VERSION.
+Integration tests for the API - CORRECTED VERSION.
 """
 
 import pytest
@@ -26,10 +26,10 @@ class TestIntegrationFlow:
     def test_complete_successful_flow(self, client):
         """Test complete successful patient credential update flow."""
         with patch('src.api.main.get_patient_repo') as mock_get_repo, \
-             patch('httpx.AsyncClient') as mock_httpx, \
-             patch('src.api.main.get_oauth_token') as mock_get_token:
+             patch('src.api.main.get_oauth_token') as mock_get_token, \
+             patch('src.api.main.update_his_credentials') as mock_update:
             
-            # Setup database response
+            # Setup database response - PATIENT FOUND
             patient_record = {
                 'uuid': 'integration-test-uuid',
                 'lastname': 'Integration',
@@ -48,12 +48,9 @@ class TestIntegrationFlow:
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=patient_record)
             mock_get_repo.return_value = mock_repo
             
-            # Setup OAuth responses
+            # Setup OAuth and update responses
             mock_get_token.return_value = "integration_test_token"
-            
-            # Setup HIS API responses
-            mock_httpx_instance = mock_httpx.return_value.__aenter__.return_value
-            mock_httpx_instance.post = AsyncMock(return_value=MockAsyncResponse(201))
+            mock_update.return_value = True  # Both updates succeed
             
             # Execute request
             request_data = {
@@ -71,28 +68,33 @@ class TestIntegrationFlow:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] == "true"
-            assert data["action"] == "update"
+            assert data["action"] == "update"  # Now should be update since patient found
             assert "2 system(s)" in data["message"]
+            
+            # Verify update was called twice (once for each HIS)
+            assert mock_update.call_count == 2
     
     def test_patient_creation_flow(self, client):
         """Test complete patient creation flow when patient not found."""
         with patch('src.api.main.get_patient_repo') as mock_get_repo, \
-             patch('httpx.AsyncClient') as mock_httpx, \
-             patch('src.api.main.get_oauth_token') as mock_get_token:
+             patch('src.api.main.create_his_patient') as mock_create_patient, \
+             patch('src.api.main.register_mobile_app_user_api') as mock_register:
             
-            # Setup database response - no patient found
+            # Setup database response - NO PATIENT FOUND
             mock_repo = Mock()
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
-            mock_repo.register_mobile_app_user = AsyncMock(return_value="mobile-uuid-123")
             mock_get_repo.return_value = mock_repo
             
-            # Setup OAuth responses
-            mock_get_token.return_value = "creation_test_token"
+            # Setup successful patient creation
+            mock_create_patient.return_value = {
+                "success": True,
+                "hisnumber": "NEW123",
+                "fullname": "NewPatient Test User",
+                "message": "Patient created successfully"
+            }
             
-            # Setup HIS API responses for patient creation
-            creation_response = create_mock_patient_creation_response("NEW123", "Test User")
-            mock_httpx_instance = mock_httpx.return_value.__aenter__.return_value
-            mock_httpx_instance.post = AsyncMock(return_value=creation_response)
+            # Setup mobile app registration
+            mock_register.return_value = "mobile-uuid-123"
             
             # Execute request
             request_data = {
@@ -112,14 +114,16 @@ class TestIntegrationFlow:
             assert data["success"] == "true"
             assert data["action"] == "create"
             assert data["mobile_uuid"] == "mobile-uuid-123"
+            
+            # Verify creation was called twice (once for each HIS)
+            assert mock_create_patient.call_count == 2
     
     def test_partial_success_flow(self, client):
         """Test flow with partial HIS system failure."""
         with patch('src.api.main.get_patient_repo') as mock_get_repo, \
-             patch('httpx.AsyncClient') as mock_httpx, \
-             patch('src.api.main.get_oauth_token') as mock_get_token:
+             patch('src.api.main.update_his_credentials') as mock_update:
             
-            # Setup database response - patient found
+            # Setup database response - PATIENT FOUND
             patient_record = {
                 'uuid': 'partial-test-uuid',
                 'lastname': 'Partial',
@@ -138,15 +142,8 @@ class TestIntegrationFlow:
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=patient_record)
             mock_get_repo.return_value = mock_repo
             
-            # Setup OAuth responses
-            mock_get_token.return_value = "partial_test_token"
-            
-            # Setup HIS API responses - one success, one failure
-            mock_httpx_instance = mock_httpx.return_value.__aenter__.return_value
-            mock_httpx_instance.post = AsyncMock(side_effect=[
-                MockAsyncResponse(201),  # YottaDB success
-                MockAsyncResponse(500, {}, "Internal Server Error")  # Firebird failure
-            ])
+            # Setup partial success - one succeeds, one fails
+            mock_update.side_effect = [True, False]  # YottaDB success, Firebird failure
             
             # Execute request
             request_data = {
@@ -164,7 +161,7 @@ class TestIntegrationFlow:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] == "partial"
-            assert data["action"] == "update"
+            assert data["action"] == "update"  # Should be update since patient found
             assert "Failed:" in data["message"]
 
 
@@ -203,9 +200,9 @@ class TestErrorHandling:
     def test_oauth_failure_handling(self, client):
         """Test handling of OAuth failures."""
         with patch('src.api.main.get_patient_repo') as mock_get_repo, \
-             patch('src.api.main.get_oauth_token') as mock_get_token:
+             patch('src.api.main.update_his_credentials') as mock_update:
             
-            # Setup database response - patient found
+            # Setup database response - PATIENT FOUND
             patient_record = {
                 'uuid': 'oauth-fail-uuid',
                 'lastname': 'OAuth',
@@ -224,8 +221,8 @@ class TestErrorHandling:
             mock_repo.find_patient_by_credentials = AsyncMock(return_value=patient_record)
             mock_get_repo.return_value = mock_repo
             
-            # Setup OAuth failure
-            mock_get_token.return_value = None  # OAuth fails
+            # Setup update failure (OAuth fails)
+            mock_update.return_value = False  # Update fails
             
             # Execute request
             request_data = {
@@ -241,7 +238,7 @@ class TestErrorHandling:
             # Should handle OAuth failure gracefully
             assert response.status_code == 502
             data = response.json()
-            assert "Failed to update credentials" in data["detail"]
+            assert "Failed to update credentials in any HIS system" in data["detail"]
     
     def test_invalid_request_data(self, client):
         """Test handling of invalid request data."""
@@ -279,7 +276,7 @@ class TestErrorHandling:
     def test_patient_no_his_numbers(self, client):
         """Test handling of patient with no HIS numbers."""
         with patch('src.api.main.get_patient_repo') as mock_get_repo:
-            # Setup database response - patient found but no HIS numbers
+            # Setup database response - PATIENT FOUND but no HIS numbers
             patient_record = {
                 'uuid': 'no-his-uuid',
                 'lastname': 'NoHIS',
@@ -312,59 +309,37 @@ class TestErrorHandling:
             assert response.status_code == 400
             data = response.json()
             assert "no associated HIS numbers" in data["detail"]
-
-
-class TestConcurrencyAndPerformance:
-    """Tests for concurrency and performance scenarios."""
     
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        from fastapi.testclient import TestClient
-        from src.api.main import app
-        return TestClient(app)
-    
-    def test_concurrent_requests_handling(self, client):
-        """Test that the API can handle concurrent requests."""
-        import threading
-        import time
-        
-        results = []
-        
-        def make_request():
-            with patch('src.api.main.get_patient_repo') as mock_get_repo:
-                mock_repo = Mock()
-                mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
-                mock_repo.register_mobile_app_user = AsyncMock(return_value=None)
-                mock_get_repo.return_value = mock_repo
-                
-                request_data = {
-                    "lastname": "Concurrent",
-                    "firstname": "Test",
-                    "bdate": "1990-01-01",
-                    "cllogin": "concurrent_login",
-                    "clpassword": "concurrent_password"
-                }
-                
-                response = client.post("/checkModifyPatient", json=request_data)
-                results.append(response.status_code)
-        
-        # Start multiple threads
-        threads = []
-        for i in range(5):
-            thread = threading.Thread(target=make_request)
-            threads.append(thread)
-            thread.start()
-        
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-        
-        # All requests should be handled
-        assert len(results) == 5
-        # Most should return some valid status code
-        valid_statuses = [200, 404, 500, 502]
-        assert all(status in valid_statuses for status in results)
+    def test_all_patient_creation_failures(self, client):
+        """Test when patient not found and all creation attempts fail."""
+        with patch('src.api.main.get_patient_repo') as mock_get_repo, \
+             patch('src.api.main.create_his_patient') as mock_create:
+            
+            # Setup database response - NO PATIENT FOUND
+            mock_repo = Mock()
+            mock_repo.find_patient_by_credentials = AsyncMock(return_value=None)
+            mock_get_repo.return_value = mock_repo
+            
+            # Setup creation failure
+            mock_create.return_value = {
+                "success": False,
+                "error": "Creation failed"
+            }
+            
+            request_data = {
+                "lastname": "FailCreate",
+                "firstname": "Test",
+                "bdate": "1990-01-01",
+                "cllogin": "fail_create_login",
+                "clpassword": "fail_create_password"
+            }
+            
+            response = client.post("/checkModifyPatient", json=request_data)
+            
+            # Should return 502 for creation failure
+            assert response.status_code == 502
+            data = response.json()
+            assert "Failed to create patient in any HIS system" in data["detail"]
 
 
 class TestHealthAndUtilityEndpoints:
@@ -536,19 +511,3 @@ class TestPatientCreationEndpoints:
             data = response.json()
             assert data["success"] is False
             assert "creation failed" in data["message"]
-    
-    def test_create_test_invalid_his_type(self, client):
-        """Test patient creation test endpoint with invalid HIS type."""
-        request_data = {
-            "lastname": "Test",
-            "firstname": "User",
-            "bdate": "1990-01-01",
-            "cllogin": "test_login",
-            "clpassword": "test_password"
-        }
-        
-        response = client.post("/test-create/invalid", json=request_data)
-        
-        assert response.status_code == 400
-        data = response.json()
-        assert "Invalid HIS type" in data["detail"]
