@@ -21,7 +21,7 @@ class TestRealAPIIntegration:
         """Test connection to real YottaDB API."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get("http://192.168.156.43")
+                response = await client.get("http://192.168.156.118")
                 # Just check if the server responds
                 assert response.status_code in [200, 404, 403, 401]  # Any response is good
         except Exception as e:
@@ -42,7 +42,7 @@ class TestRealAPIIntegration:
     async def test_real_oauth_endpoints(self):
         """Test real OAuth endpoints."""
         endpoints = [
-            "http://192.168.156.43/token",
+            "http://192.168.156.118:7072/token",
             "http://192.168.160.141/token"
         ]
         

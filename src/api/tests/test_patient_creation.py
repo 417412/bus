@@ -120,10 +120,11 @@ class TestMobileAppUserRegistration:
     @pytest.mark.asyncio
     async def test_register_mobile_app_user_success(self, mock_patient_repo):
         """Test successful mobile app user registration."""
-        with patch.dict('os.environ', {"MOBILE_APP_REGISTRATION_ENABLED": "true"}):
-            from src.api import config
-            config.MOBILE_APP_CONFIG["registration_enabled"] = True
-            
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }):
             result = await register_mobile_app_user_api(
                 hisnumber_qms="QMS123",
                 hisnumber_infoclinica="IC456",
@@ -134,29 +135,164 @@ class TestMobileAppUserRegistration:
             mock_patient_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
     
     @pytest.mark.asyncio
-    async def test_register_mobile_app_user_no_his_numbers(self, mock_patient_repo):
-        """Test mobile app user registration without HIS numbers."""
-        result = await register_mobile_app_user_api(patient_repo=mock_patient_repo)
-        assert result is None
+    async def test_register_mobile_app_user_success_with_both_his_required(self, mock_patient_repo):
+        """Test successful mobile app user registration when both HIS numbers are required and provided."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": True,
+            "auto_register_on_create": True
+        }):
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_patient_repo
+            )
+            
+            assert result == "test-mobile-uuid"
+            mock_patient_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
     
     @pytest.mark.asyncio
-    async def test_register_mobile_app_user_requires_both_his(self, mock_patient_repo):
-        """Test mobile app user registration when both HIS numbers required."""
-        with patch.dict('os.environ', {
-            "MOBILE_APP_REGISTRATION_ENABLED": "true",
-            "MOBILE_APP_REQUIRE_BOTH_HIS": "true"
+    async def test_register_mobile_app_user_disabled(self, mock_patient_repo):
+        """Test mobile app user registration when disabled."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": False,
+            "require_both_his": False,
+            "auto_register_on_create": True
         }):
-            from src.api import config
-            config.MOBILE_APP_CONFIG["registration_enabled"] = True
-            config.MOBILE_APP_CONFIG["require_both_his"] = True
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_patient_repo
+            )
             
-            # Only one HIS number provided
+            assert result is None
+            mock_patient_repo.register_mobile_app_user.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_no_his_numbers(self, mock_patient_repo):
+        """Test mobile app user registration without HIS numbers."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }):
+            result = await register_mobile_app_user_api(patient_repo=mock_patient_repo)
+            assert result is None
+            mock_patient_repo.register_mobile_app_user.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_requires_both_his_only_qms(self, mock_patient_repo):
+        """Test mobile app user registration when both HIS numbers required but only QMS provided."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": True,
+            "auto_register_on_create": True
+        }):
+            # Only QMS HIS number provided
             result = await register_mobile_app_user_api(
                 hisnumber_qms="QMS123",
                 patient_repo=mock_patient_repo
             )
             assert result is None
-
+            mock_patient_repo.register_mobile_app_user.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_requires_both_his_only_infoclinica(self, mock_patient_repo):
+        """Test mobile app user registration when both HIS numbers required but only Infoclinica provided."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": True,
+            "auto_register_on_create": True
+        }):
+            # Only Infoclinica HIS number provided
+            result = await register_mobile_app_user_api(
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_patient_repo
+            )
+            assert result is None
+            mock_patient_repo.register_mobile_app_user.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_single_his_when_not_required(self, mock_patient_repo):
+        """Test mobile app user registration with single HIS number when both not required."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }):
+            # Only QMS HIS number provided, but both not required
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                patient_repo=mock_patient_repo
+            )
+            
+            assert result == "test-mobile-uuid"
+            mock_patient_repo.register_mobile_app_user.assert_called_once_with("QMS123", None)
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_repository_failure(self, mock_patient_repo):
+        """Test mobile app user registration when repository returns None."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }):
+            # Mock repository to return None (registration failed)
+            mock_patient_repo.register_mobile_app_user = AsyncMock(return_value=None)
+            
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_patient_repo
+            )
+            
+            assert result is None
+            mock_patient_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_repository_exception(self, mock_patient_repo):
+        """Test mobile app user registration when repository raises exception."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }):
+            # Mock repository to raise exception
+            mock_patient_repo.register_mobile_app_user = AsyncMock(
+                side_effect=Exception("Database connection failed")
+            )
+            
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456",
+                patient_repo=mock_patient_repo
+            )
+            
+            assert result is None
+            mock_patient_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
+    
+    @pytest.mark.asyncio
+    async def test_register_mobile_app_user_no_patient_repo(self):
+        """Test mobile app user registration when no patient repo provided."""
+        with patch('src.api.main.MOBILE_APP_CONFIG', {
+            "registration_enabled": True,
+            "require_both_his": False,
+            "auto_register_on_create": True
+        }), patch('src.api.main.get_patient_repository') as mock_get_repo:
+            
+            # Mock the get_patient_repository function
+            mock_repo = Mock()
+            mock_repo.register_mobile_app_user = AsyncMock(return_value="auto-repo-uuid")
+            mock_get_repo.return_value = mock_repo
+            
+            result = await register_mobile_app_user_api(
+                hisnumber_qms="QMS123",
+                hisnumber_infoclinica="IC456"
+            )
+            
+            assert result == "auto-repo-uuid"
+            mock_get_repo.assert_called_once()
+            mock_repo.register_mobile_app_user.assert_called_once_with("QMS123", "IC456")
 
 class TestPatientCreationTestEndpoint:
     """Tests for the patient creation test endpoint."""
