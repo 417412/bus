@@ -501,48 +501,70 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
             batch_success_count = 0
             batch_new_count = 0
             batch_updated_count = 0
+            processed_in_batch = []  # NEW: Collect hisnumbers to mark as processed
             
-            # In perform_yottadb_sync function, around line 380-420
-        for raw_patient in patients:
-            try:
-                # Use ETL service to process patient with Patient model
-                patient = etl_service.process_patient_record(raw_patient)
-                if not patient:
-                    logger.warning(f"Failed to process YottaDB patient record: {raw_patient.get('hisnumber')}")
-                    status["error_count"] += 1
-                    # FIXED: Mark as processed even if processing fails to avoid infinite loop
-                    if 'hisnumber' in raw_patient:
-                        etl_service.source_repo.add_processed_hisnumber(raw_patient['hisnumber'])
-                    continue
-                
-                # Convert to dict for database operations
-                patient_dict = patient.to_patientsdet_dict()
-                
-                # Check if patient exists to track new vs updated
-                patient_exists = etl_service.target_repo.patient_exists(patient.hisnumber, patient.source)
-                
-                # Always upsert (insert or update)
-                if etl_service.target_repo.upsert_patient(patient_dict):
-                    batch_success_count += 1
-                    if patient_exists:
-                        batch_updated_count += 1
+            for raw_patient in patients:
+                try:
+                    # Use ETL service to process patient with Patient model
+                    patient = etl_service.process_patient_record(raw_patient)
+                    if not patient:
+                        logger.warning(f"Failed to process YottaDB patient record: {raw_patient.get('hisnumber')}")
+                        status["error_count"] += 1
+                        # Still mark as processed to avoid infinite loop
+                        if 'hisnumber' in raw_patient:
+                            processed_in_batch.append(raw_patient['hisnumber'])
+                        continue
+                    
+                    # Convert to dict for database operations
+                    patient_dict = patient.to_patientsdet_dict()
+                    
+                    # Check if patient exists to track new vs updated
+                    patient_exists = etl_service.target_repo.patient_exists(patient.hisnumber, patient.source)
+                    
+                    # Always upsert (insert or update)
+                    if etl_service.target_repo.upsert_patient(patient_dict):
+                        batch_success_count += 1
+                        if patient_exists:
+                            batch_updated_count += 1
+                        else:
+                            batch_new_count += 1
                     else:
-                        batch_new_count += 1
-                else:
-                    logger.error(f"Failed to upsert YottaDB patient {patient.hisnumber}")
+                        logger.error(f"Failed to upsert YottaDB patient {patient.hisnumber}")
+                        status["error_count"] += 1
+                    
+                    # NEW: Always mark as processed (collect for batch update)
+                    processed_in_batch.append(patient.hisnumber)
+                    
+                except Exception as e:
+                    hisnumber = raw_patient.get('hisnumber', 'unknown')
+                    logger.error(f"Error processing YottaDB patient {hisnumber}: {e}")
                     status["error_count"] += 1
-                
-                # FIXED: Always mark as processed, whether successful or not, to avoid infinite loop
-                etl_service.source_repo.add_processed_hisnumber(patient.hisnumber)
-                
-            except Exception as e:
-                hisnumber = raw_patient.get('hisnumber', 'unknown')
-                logger.error(f"Error processing YottaDB patient {hisnumber}: {e}")
-                status["error_count"] += 1
-                
-                # FIXED: Mark as processed even when there's an exception to avoid infinite loop
-                if hisnumber != 'unknown':
-                    etl_service.source_repo.add_processed_hisnumber(hisnumber)
+                    
+                    # NEW: Mark as processed even when there's an exception (collect for batch update)
+                    if hisnumber != 'unknown':
+                        processed_in_batch.append(hisnumber)
+            
+            # NEW: Batch update processed hisnumbers at the end of each batch
+            if processed_in_batch:
+                try:
+                    # Check if the repository has the batch method
+                    if hasattr(etl_service.source_repo, 'add_processed_hisnumbers_batch'):
+                        etl_service.source_repo.add_processed_hisnumbers_batch(processed_in_batch)
+                    else:
+                        # Fallback to manual batch update
+                        current_processed = etl_service.source_repo.get_processed_hisnumbers()
+                        current_processed.update(processed_in_batch)
+                        etl_service.source_repo.save_processed_hisnumbers(current_processed)
+                    
+                    logger.debug(f"Marked {len(processed_in_batch)} hisnumbers as processed in batch")
+                except Exception as e:
+                    logger.error(f"Error batch updating processed hisnumbers: {e}")
+                    # Fallback to individual updates
+                    for hisnumber in processed_in_batch:
+                        try:
+                            etl_service.source_repo.add_processed_hisnumber(hisnumber)
+                        except Exception as individual_error:
+                            logger.error(f"Error marking {hisnumber} as processed: {individual_error}")
             
             # Update status
             status["processed_records"] += len(patients)

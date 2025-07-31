@@ -422,3 +422,21 @@ class YottaDBRepository:
             self.logger.info("Reset YottaDB processed state - will re-process all patients")
         except Exception as e:
             self.logger.error(f"Error resetting processed state: {str(e)}")
+    
+    def add_processed_hisnumbers_batch(self, hisnumbers: List[str]) -> None:
+        """
+        Add multiple hisnumbers to the processed set efficiently.
+        
+        Args:
+            hisnumbers: List of hisnumbers to mark as processed
+        """
+        try:
+            if not hisnumbers:
+                return
+                
+            processed = self.get_processed_hisnumbers()
+            processed.update(hisnumbers)
+            self.save_processed_hisnumbers(processed)
+            self.logger.debug(f"Added {len(hisnumbers)} hisnumbers to processed set")
+        except Exception as e:
+            self.logger.error(f"Error batch adding processed hisnumbers: {str(e)}")
