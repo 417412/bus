@@ -49,3 +49,8 @@ src/api/tests/__pycache__/test_main.cpython-311-pytest-7.4.3.pyc
 src/api/tests/__pycache__/test_oauth.cpython-311-pytest-7.4.3.pyc
 src/api/tests/__pycache__/test_patient_creation.cpython-311-pytest-7.4.3.pyc
 src/api/tests/__pycache__/test_performance.cpython-311-pytest-7.4.3.pyc
+src/api/tests/__pycache__/conftest.cpython-311-pytest-7.4.3.pyc
+src/api/tests/__pycache__/test_integration_real.cpython-311-pytest-7.4.3.pyc
+src/api/tests/__pycache__/test_integration.cpython-311-pytest-7.4.3.pyc
+src/api/tests/__pycache__/test_patient_creation.cpython-311-pytest-7.4.3.pyc
+src/api/tests/__pycache__/test_performance.cpython-311-pytest-7.4.3.pyc

@@ -502,39 +502,47 @@ def perform_yottadb_sync(etl_service: ETLService, max_records: int) -> Dict[str,
             batch_new_count = 0
             batch_updated_count = 0
             
-            for raw_patient in patients:
-                try:
-                    # Use ETL service to process patient with Patient model
-                    patient = etl_service.process_patient_record(raw_patient)
-                    if not patient:
-                        logger.warning(f"Failed to process YottaDB patient record: {raw_patient.get('hisnumber')}")
-                        status["error_count"] += 1
-                        continue
-                    
-                    # Convert to dict for database operations
-                    patient_dict = patient.to_patientsdet_dict()
-                    
-                    # Check if patient exists to track new vs updated
-                    patient_exists = etl_service.target_repo.patient_exists(patient.hisnumber, patient.source)
-                    
-                    # Always upsert (insert or update)
-                    if etl_service.target_repo.upsert_patient(patient_dict):
-                        batch_success_count += 1
-                        if patient_exists:
-                            batch_updated_count += 1
-                        else:
-                            batch_new_count += 1
-                        
-                        # Mark this hisnumber as processed
-                        etl_service.source_repo.add_processed_hisnumber(patient.hisnumber)
-                        
-                    else:
-                        logger.error(f"Failed to upsert YottaDB patient {patient.hisnumber}")
-                        status["error_count"] += 1
-                    
-                except Exception as e:
-                    logger.error(f"Error processing YottaDB patient {raw_patient.get('hisnumber')}: {e}")
+            # In perform_yottadb_sync function, around line 380-420
+        for raw_patient in patients:
+            try:
+                # Use ETL service to process patient with Patient model
+                patient = etl_service.process_patient_record(raw_patient)
+                if not patient:
+                    logger.warning(f"Failed to process YottaDB patient record: {raw_patient.get('hisnumber')}")
                     status["error_count"] += 1
+                    # FIXED: Mark as processed even if processing fails to avoid infinite loop
+                    if 'hisnumber' in raw_patient:
+                        etl_service.source_repo.add_processed_hisnumber(raw_patient['hisnumber'])
+                    continue
+                
+                # Convert to dict for database operations
+                patient_dict = patient.to_patientsdet_dict()
+                
+                # Check if patient exists to track new vs updated
+                patient_exists = etl_service.target_repo.patient_exists(patient.hisnumber, patient.source)
+                
+                # Always upsert (insert or update)
+                if etl_service.target_repo.upsert_patient(patient_dict):
+                    batch_success_count += 1
+                    if patient_exists:
+                        batch_updated_count += 1
+                    else:
+                        batch_new_count += 1
+                else:
+                    logger.error(f"Failed to upsert YottaDB patient {patient.hisnumber}")
+                    status["error_count"] += 1
+                
+                # FIXED: Always mark as processed, whether successful or not, to avoid infinite loop
+                etl_service.source_repo.add_processed_hisnumber(patient.hisnumber)
+                
+            except Exception as e:
+                hisnumber = raw_patient.get('hisnumber', 'unknown')
+                logger.error(f"Error processing YottaDB patient {hisnumber}: {e}")
+                status["error_count"] += 1
+                
+                # FIXED: Mark as processed even when there's an exception to avoid infinite loop
+                if hisnumber != 'unknown':
+                    etl_service.source_repo.add_processed_hisnumber(hisnumber)
             
             # Update status
             status["processed_records"] += len(patients)
