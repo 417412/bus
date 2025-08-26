@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 import logging
 import uuid as uuid_module
 from contextlib import asynccontextmanager
+from src.api.config import HIS_API_CONFIG, MOBILE_APP_CONFIG, get_postgresql_config, setup_api_logger
 
 # Add the parent directory to the path
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -464,210 +465,240 @@ async def register_mobile_app_user_api(hisnumber_qms: Optional[str] = None,
         logger.error(f"Error registering mobile app user: {e}")
         return None
 
-@app.post("/checkModifyPatient", response_model=PatientResponse)
-async def check_modify_patient(request: PatientCredentialRequest,
-                             patient_repo: PatientRepository = Depends(get_patient_repo)):
+@app.post("/checkModifyPatient")
+async def check_modify_patient(request: PatientCredentialRequest):
     """
-    MAIN API ENDPOINT: Check and modify patient credentials across HIS systems.
-    If patient not found, creates patient in both HIS systems and registers mobile app user.
+    Enhanced endpoint with mobile app registration and login/password updates.
     
-    This is the core functionality:
-    1. Search for existing patient by credentials
-    2. If found: Update login/password in HIS systems 
-    3. If not found: Create new patient in both HIS systems and register mobile app user
+    Flow:
+    1. Check if patient exists with this login
+    2. If not, create in both HIS systems and register mobile app user
+    3. If exists, check which HIS numbers are missing
+    4. If both HIS numbers exist, update login/password in both systems
+    5. If missing HIS numbers, create patient in missing HIS
+    6. Register/update mobile app user for proper matching
     """
-    logger.info(f"Processing credential request for patient: {request.lastname}, {request.firstname}")
-    
     try:
-        # Step 1: Find patient in PostgreSQL database
-        patient = await patient_repo.find_patient_by_credentials(
-            lastname=request.lastname,
-            firstname=request.firstname,
-            midname=request.midname,
-            bdate=request.get_bdate_as_date(),  # FIXED: Convert to date object
-            cllogin=request.cllogin
+        patient_repo = get_patient_repository()
+        
+        # Step 1: Check if patient exists with this login
+        existing_patient = await patient_repo.find_patient_by_credentials(
+            request.cllogin, request.clpassword
         )
         
-        if patient:
-            # PATIENT FOUND - UPDATE CREDENTIALS IN HIS SYSTEMS
-            logger.info(f"Patient found, updating credentials: {patient['uuid']}")
-            
-            # Prepare authenticated API calls for both HIS systems
-            update_tasks = []
-            systems_to_update = []
-            
-            # Update YottaDB if patient has qMS number
-            if patient['hisnumber_qms']:
-                logger.info(f"Scheduling YottaDB credential update for patient {patient['hisnumber_qms']}")
-                update_tasks.append(
-                    update_his_credentials('yottadb', patient['hisnumber_qms'], request.cllogin, request.clpassword)
-                )
-                systems_to_update.append("YottaDB")
-            else:
-                logger.info("Patient has no qMS number, skipping YottaDB update")
-            
-            # Update Firebird if patient has Infoclinica number  
-            if patient['hisnumber_infoclinica']:
-                logger.info(f"Scheduling Firebird credential update for patient {patient['hisnumber_infoclinica']}")
-                update_tasks.append(
-                    update_his_credentials('firebird', patient['hisnumber_infoclinica'], request.cllogin, request.clpassword)
-                )
-                systems_to_update.append("Firebird")
-            else:
-                logger.info("Patient has no Infoclinica number, skipping Firebird update")
-            
-            if not update_tasks:
-                logger.error("Patient has no HIS numbers, cannot update credentials")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Patient has no associated HIS numbers"
-                )
-            
-            # Execute all authenticated API calls concurrently
-            logger.info(f"Executing {len(update_tasks)} authenticated credential update operations")
-            results = await asyncio.gather(*update_tasks, return_exceptions=True)
-            
-            # Check results
-            success_count = 0
-            failed_systems = []
-            
-            for i, result in enumerate(results):
-                system_name = systems_to_update[i]
-                
-                if isinstance(result, Exception):
-                    logger.error(f"{system_name} update failed with exception: {result}")
-                    failed_systems.append(system_name)
-                elif result:
-                    success_count += 1
-                    logger.info(f"{system_name} update completed successfully")
-                else:
-                    logger.error(f"{system_name} update failed")
-                    failed_systems.append(system_name)
-            
-            # Return appropriate response for updates
-            if success_count == len(update_tasks):
-                logger.info(f"All {success_count} credential updates completed successfully")
-                return PatientResponse(
-                    success="true",
-                    message=f"Credentials updated successfully in {success_count} system(s): {', '.join(systems_to_update)}",
-                    action="update"
-                )
-            elif success_count > 0:
-                logger.warning(f"Partial success: {success_count}/{len(update_tasks)} updates completed")
-                successful_systems = [systems_to_update[i] for i, result in enumerate(results) if result and not isinstance(result, Exception)]
-                failed_list = ", ".join(failed_systems)
-                return PatientResponse(
-                    success="partial",
-                    message=f"Credentials updated in: {', '.join(successful_systems)}. Failed: {failed_list}",
-                    action="update"
-                )
-            else:
-                logger.error("All credential update operations failed")
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Failed to update credentials in any HIS system"
-                )
+        qms_result = None
+        ic_result = None
+        mobile_uuid = None
         
-        else:
-            # PATIENT NOT FOUND - CREATE NEW PATIENT IN BOTH HIS SYSTEMS
-            logger.info(f"Patient not found, creating in both HIS systems: {request.lastname}, {request.firstname}")
+        if not existing_patient:
+            # Step 2: Patient doesn't exist - create in both HIS systems
+            logger.info(f"Patient not found, creating in both HIS systems for login: {request.cllogin}")
             
-            # Prepare patient creation calls for both HIS systems
-            create_tasks = [
-                create_his_patient('yottadb', request),
-                create_his_patient('firebird', request)
-            ]
-            systems_to_create = ["YottaDB", "Firebird"]
+            # Create in both HIS systems
+            qms_result = await create_his_patient('yottadb', request)
+            ic_result = await create_his_patient('infoclinica', request)
             
-            # Execute all authenticated API calls concurrently
-            logger.info(f"Executing {len(create_tasks)} authenticated patient creation operations")
-            results = await asyncio.gather(*create_tasks, return_exceptions=True)
+            # Get HIS numbers from results
+            qms_hisnumber = qms_result.get("hisnumber") if qms_result and qms_result.get("success") else None
+            ic_hisnumber = ic_result.get("hisnumber") if ic_result and ic_result.get("success") else None
             
-            # Check results and extract HIS numbers for mobile app registration
-            success_count = 0
-            failed_systems = []
-            created_hisnumbers = {}
-            successful_systems = []
-            
-            for i, result in enumerate(results):
-                system_name = systems_to_create[i]
-                his_type = 'yottadb' if i == 0 else 'firebird'
-                
-                if isinstance(result, Exception):
-                    logger.error(f"{system_name} creation failed with exception: {result}")
-                    failed_systems.append(system_name)
-                elif isinstance(result, dict):
-                    if result.get('success'):
-                        success_count += 1
-                        successful_systems.append(system_name)
-                        hisnumber = result.get('hisnumber')
-                        if hisnumber:
-                            created_hisnumbers[his_type] = hisnumber
-                            logger.info(f"{system_name} creation completed successfully, HIS number: {hisnumber}")
-                        else:
-                            logger.info(f"{system_name} creation completed successfully")
-                    else:
-                        logger.error(f"{system_name} creation failed: {result.get('error')}")
-                        failed_systems.append(system_name)
-                else:
-                    # Legacy boolean response
-                    if result:
-                        success_count += 1
-                        successful_systems.append(system_name)
-                        logger.info(f"{system_name} creation completed successfully")
-                    else:
-                        logger.error(f"{system_name} creation failed")
-                        failed_systems.append(system_name)
-            
-            # Register mobile app user if at least one creation succeeded
-            mobile_uuid = None
-            if (MOBILE_APP_CONFIG["auto_register_on_create"] and 
-                success_count > 0 and 
-                (created_hisnumbers or not MOBILE_APP_CONFIG["require_both_his"])):
-                
+            # Register mobile app user with both HIS numbers for proper matching
+            if qms_hisnumber or ic_hisnumber:
                 mobile_uuid = await register_mobile_app_user_api(
-                    hisnumber_qms=created_hisnumbers.get('yottadb'),
-                    hisnumber_infoclinica=created_hisnumbers.get('firebird'),
+                    hisnumber_qms=qms_hisnumber,
+                    hisnumber_infoclinica=ic_hisnumber,
                     patient_repo=patient_repo
                 )
+                logger.info(f"Registered mobile app user: {mobile_uuid} with QMS: {qms_hisnumber}, IC: {ic_hisnumber}")
             
-            # Return appropriate response for creation
-            if success_count == len(create_tasks):
-                logger.info(f"All {success_count} patient creations completed successfully")
-                response_message = f"Patient created successfully in {success_count} system(s): {', '.join(successful_systems)}"
+        else:
+            # Step 3: Patient exists - check which HIS numbers are missing
+            logger.info(f"Patient found: {existing_patient.get('uuid')}")
+            
+            has_qms = bool(existing_patient.get('hisnumber_qms'))
+            has_ic = bool(existing_patient.get('hisnumber_infoclinica'))
+            
+            current_qms = existing_patient.get('hisnumber_qms')
+            current_ic = existing_patient.get('hisnumber_infoclinica')
+            
+            if has_qms and has_ic:
+                # Step 4: Both HIS numbers exist - update login/password in both systems
+                logger.info("Both HIS numbers exist, updating login/password in both systems")
                 
-                return PatientResponse(
-                    success="true",
-                    message=response_message,
-                    action="create",
-                    mobile_uuid=mobile_uuid
-                )
-            elif success_count > 0:
-                logger.warning(f"Partial success: {success_count}/{len(create_tasks)} creations completed")
-                failed_list = ", ".join(failed_systems)
-                response_message = f"Patient created in: {', '.join(successful_systems)}. Failed: {failed_list}"
+                # Update QMS login/password
+                qms_result = await update_his_patient_credentials('yottadb', current_qms, request)
                 
-                return PatientResponse(
-                    success="partial",
-                    message=response_message,
-                    action="create",
-                    mobile_uuid=mobile_uuid
+                # Update Infoclinica login/password  
+                ic_result = await update_his_patient_credentials('infoclinica', current_ic, request)
+                
+                # Update the database with new credentials
+                await patient_repo.update_patient_credentials(
+                    existing_patient.get('uuid'),
+                    qms_login=request.cllogin,
+                    qms_password=request.clpassword,
+                    ic_login=request.cllogin,
+                    ic_password=request.clpassword
                 )
+                
+                mobile_uuid = existing_patient.get('uuid')  # Use existing patient UUID
+                
             else:
-                logger.error("All patient creation operations failed")
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Failed to create patient in any HIS system"
+                # Step 5: Create patient in missing HIS systems
+                if not has_qms:
+                    logger.info("Creating patient in QMS (missing)")
+                    qms_result = await create_his_patient('yottadb', request)
+                    if qms_result and qms_result.get("success"):
+                        current_qms = qms_result.get("hisnumber")
+                
+                if not has_ic:
+                    logger.info("Creating patient in Infoclinica (missing)")
+                    ic_result = await create_his_patient('infoclinica', request)
+                    if ic_result and ic_result.get("success"):
+                        current_ic = ic_result.get("hisnumber")
+                
+                # Step 6: Update/create mobile app user for proper matching
+                existing_mobile_user = await patient_repo.find_mobile_app_user_by_patient_uuid(
+                    existing_patient.get('uuid')
                 )
-    
-    except HTTPException:
-        raise
+                
+                if existing_mobile_user:
+                    # Update existing mobile app user
+                    mobile_uuid = await patient_repo.update_mobile_app_user_hisnumbers(
+                        existing_mobile_user.get('uuid'),
+                        hisnumber_qms=current_qms,
+                        hisnumber_infoclinica=current_ic
+                    )
+                    logger.info(f"Updated mobile app user: {mobile_uuid}")
+                else:
+                    # Create new mobile app user entry for matching
+                    mobile_uuid = await register_mobile_app_user_api(
+                        hisnumber_qms=current_qms,
+                        hisnumber_infoclinica=current_ic,
+                        patient_repo=patient_repo
+                    )
+                    logger.info(f"Created mobile app user for existing patient: {mobile_uuid}")
+        
+        # Prepare response
+        response_data = {
+            "success": True,
+            "patient_uuid": existing_patient.get('uuid') if existing_patient else None,
+            "mobile_uuid": mobile_uuid,
+            "qms_result": qms_result,
+            "infoclinica_result": ic_result,
+            "message": "Patient processing completed"
+        }
+        
+        # Add HIS numbers to response
+        if existing_patient:
+            response_data.update({
+                "hisnumber_qms": existing_patient.get('hisnumber_qms'),
+                "hisnumber_infoclinica": existing_patient.get('hisnumber_infoclinica'),
+                "operation": "both_exist_updated" if (has_qms and has_ic) else "missing_created"
+            })
+        else:
+            response_data["operation"] = "new_patient_created"
+        
+        return response_data
+        
     except Exception as e:
-        logger.error(f"Unexpected error processing request: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+        logger.error(f"Error in check_modify_patient: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to process patient"
+        }
+
+
+async def update_his_patient_credentials(system_name: str, hisnumber: str, patient_data: PatientCredentialRequest):
+    """Update patient login/password credentials in HIS system."""
+    try:
+        system_config = HIS_API_CONFIG.get(system_name.lower())
+        if not system_config:
+            return {"success": False, "error": f"Unknown HIS system: {system_name}"}
+        
+        # Map system names to match your config
+        # Since your config uses 'yottadb' and 'firebird' but you might be calling with different names
+        system_map = {
+            'yottadb': 'yottadb',
+            'qms': 'yottadb',
+            'firebird': 'firebird', 
+            'infoclinica': 'firebird',
+            'ic': 'firebird'
+        }
+        
+        actual_system = system_map.get(system_name.lower())
+        if not actual_system:
+            return {"success": False, "error": f"Unknown HIS system: {system_name}"}
+            
+        system_config = HIS_API_CONFIG.get(actual_system)
+        if not system_config:
+            return {"success": False, "error": f"No configuration for HIS system: {actual_system}"}
+        
+        # Get authentication token
+        auth_token = await get_oauth_token(actual_system)
+        if not auth_token:
+            return {"success": False, "error": f"Failed to get auth token for {actual_system}"}
+        
+        # Prepare headers
+        headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Use the credentials_endpoint from config, replacing the placeholder
+        credentials_endpoint = system_config.get("credentials_endpoint", "/updatePatients/{hisnumber}/credentials")
+        update_url = f"{system_config['base_url']}{credentials_endpoint}".format(hisnumber=hisnumber)
+        
+        # Prepare update data
+        update_data = {
+            "pcode": hisnumber,  # Patient code/number in HIS
+            "cllogin": patient_data.cllogin,
+            "clpassword": patient_data.clpassword
+        }
+        
+        # Make API call to update credentials
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Use PUT for credential updates
+            response = await client.put(
+                update_url,
+                json=update_data,
+                headers=headers
+            )
+            
+            if response.status_code in [200, 201, 204]:  # Added 204 for successful updates with no content
+                try:
+                    data = response.json() if response.content else {}
+                    logger.info(f"Successfully updated credentials in {actual_system} for patient {hisnumber}")
+                    return {
+                        "success": True,
+                        "hisnumber": hisnumber,
+                        "system": actual_system,
+                        "message": f"Credentials updated in {actual_system}",
+                        "response_data": data
+                    }
+                except Exception as json_error:
+                    logger.warning(f"Could not parse JSON response from {actual_system}, but status was success")
+                    return {
+                        "success": True,
+                        "hisnumber": hisnumber,
+                        "system": actual_system,
+                        "message": f"Credentials updated in {actual_system}"
+                    }
+            else:
+                logger.error(f"Failed to update credentials in {actual_system}: {response.status_code} - {response.text}")
+                return {
+                    "success": False,
+                    "error": f"HIS API error: {response.status_code}",
+                    "system": actual_system,
+                    "details": response.text
+                }
+    
+    except Exception as e:
+        logger.error(f"Error updating patient credentials in {system_name}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # ALL OTHER ENDPOINTS ARE SUPPORTING/UTILITY ENDPOINTS
 

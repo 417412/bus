@@ -327,6 +327,35 @@ class PatientRepository:
         except Exception as e:
             logger.error(f"Error getting patient matching stats: {e}")
             return []
+    
+    async def update_patient_credentials(self, patient_uuid: str, 
+                                       qms_login: Optional[str] = None, 
+                                       qms_password: Optional[str] = None,
+                                       ic_login: Optional[str] = None, 
+                                       ic_password: Optional[str] = None) -> bool:
+        """Update patient login/password credentials in database."""
+        try:
+            query = """
+                UPDATE patients 
+                SET login_qms = COALESCE($2, login_qms),
+                    password_qms = COALESCE($3, password_qms),
+                    login_infoclinica = COALESCE($4, login_infoclinica),
+                    password_infoclinica = COALESCE($5, password_infoclinica),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE uuid = $1
+            """
+            
+            await self.pool.execute_query(
+                query, 
+                (patient_uuid, qms_login, qms_password, ic_login, ic_password)
+            )
+            
+            logger.info(f"Updated credentials for patient: {patient_uuid}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating patient credentials: {e}")
+            return False
 
 def get_patient_repository() -> PatientRepository:
     """Get patient repository instance."""
