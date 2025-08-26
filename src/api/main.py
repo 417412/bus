@@ -932,11 +932,49 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+    import traceback
     
-    config = get_api_config()
-    uvicorn.run(
-        app, 
-        host=config["api"]["host"], 
-        port=config["api"]["port"],
-        log_level="info"
-    )
+    # Add console logging for startup debugging
+    import logging
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    
+    startup_logger = logging.getLogger("startup_debug")
+    startup_logger.addHandler(console_handler)
+    startup_logger.setLevel(logging.INFO)
+    
+    try:
+        startup_logger.info("=== Starting Patient API ===")
+        startup_logger.info("Loading configuration...")
+        
+        config = get_api_config()
+        startup_logger.info(f"Config loaded successfully")
+        startup_logger.info(f"API will start on {config['api']['host']}:{config['api']['port']}")
+        
+        # Test database connection
+        startup_logger.info("Testing database configuration...")
+        pg_config = get_postgresql_config()
+        startup_logger.info(f"Database: {pg_config['host']}:{pg_config['port']}/{pg_config['database']}")
+        
+        # Test HIS API configuration
+        startup_logger.info("Checking HIS API configuration...")
+        for his_name, his_config in HIS_API_CONFIG.items():
+            startup_logger.info(f"{his_name.upper()}: {his_config['base_url']}")
+        
+        startup_logger.info("Starting uvicorn server...")
+        uvicorn.run(
+            app, 
+            host=config["api"]["host"], 
+            port=config["api"]["port"],
+            log_level="info"
+        )
+        
+    except Exception as e:
+        startup_logger.error(f"Failed to start API: {e}")
+        startup_logger.error(f"Full traceback: {traceback.format_exc()}")
+        print(f"\n=== STARTUP ERROR ===")
+        print(f"Error: {e}")
+        print(f"Full traceback:\n{traceback.format_exc()}")
+        exit(1)
