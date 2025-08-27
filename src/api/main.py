@@ -11,11 +11,11 @@ from typing import Optional, Dict, Any
 import logging
 import uuid as uuid_module
 from contextlib import asynccontextmanager
-from src.api.config import HIS_API_CONFIG, MOBILE_APP_CONFIG, get_postgresql_config, setup_api_logger
 
 # Add the parent directory to the path
 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(parent_dir)
+from src.api.config import HIS_API_CONFIG, MOBILE_APP_CONFIG, get_postgresql_config, setup_api_logger
 
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
