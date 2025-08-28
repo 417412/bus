@@ -14,8 +14,8 @@ Environment=DEBUG=false
 Environment=LOG_LEVEL=INFO
 
 # HIS API Configuration
-Environment=YOTTADB_API_BASE=http://192.168.156.43
-Environment=YOTTADB_TOKEN_URL=http://192.168.156.43/token
+Environment=YOTTADB_API_BASE=https://192.168.156.118:10443
+Environment=YOTTADB_TOKEN_URL=https://192.168.156.118:10443/token
 Environment=YOTTADB_CLIENT_ID=admin
 Environment=YOTTADB_CLIENT_SECRET=secret
 Environment=YOTTADB_USERNAME=admin

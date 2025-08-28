@@ -7,8 +7,8 @@ echo "Starting Patient Credential Management API..."
 # =============================================================================
 
 # YottaDB API Configuration
-export YOTTADB_API_BASE="http://192.168.156.43"
-export YOTTADB_TOKEN_URL="http://192.168.156.43/token"
+export YOTTADB_API_BASE="https://192.168.156.118:10443"
+export YOTTADB_TOKEN_URL="https://192.168.156.118:10443/token"
 export YOTTADB_CLIENT_ID=""                             # CHANGED: Empty string (not "admin")
 export YOTTADB_CLIENT_SECRET=""                         # CHANGED: Empty string (not "secret") 
 export YOTTADB_USERNAME="admin"

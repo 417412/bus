@@ -63,11 +63,11 @@ def get_postgresql_config():
 # HIS System API Endpoints with OAuth Configuration - CONFIRMED WORKING
 HIS_API_CONFIG = {
     "yottadb": {
-        "base_url": os.getenv("YOTTADB_API_BASE", "http://192.168.156.43:7072"),
+        "base_url": os.getenv("YOTTADB_API_BASE", "https://192.168.156.43:10443"),
         "credentials_endpoint": "/updatePatients/{hisnumber}/credentials",
         "create_endpoint": "/createPatients",  # CONFIRMED: This works perfectly
         "oauth": {
-            "token_url": os.getenv("YOTTADB_TOKEN_URL", "http://192.168.156.43:7072/token"),
+            "token_url": os.getenv("YOTTADB_TOKEN_URL", "https://192.168.156.43:10443/token"),
             "client_id": os.getenv("YOTTADB_CLIENT_ID", ""),  # CORRECT: Empty string
             "client_secret": os.getenv("YOTTADB_CLIENT_SECRET", ""),  # CORRECT: Empty string
             "username": os.getenv("YOTTADB_USERNAME", "admin"),
