@@ -144,64 +144,78 @@ class PatientRepository:
     
     async def find_patient_by_credentials(self, lastname: str, firstname: str, 
                                         midname: Optional[str], bdate: str, 
-                                        cllogin: str) -> Optional[Dict[str, Any]]:
-        """
-        Find patient in database by demographic data and login.
-        
-        This function searches for patients using the same logic as the triggers:
-        1. Match by lastname, firstname (name), midname (surname), birthdate
-        2. Check if cllogin matches either login_qms or login_infoclinica
-        """
+                                        cllogin: str, clpassword: str) -> Optional[Dict]:
+        """Find patient by comprehensive credentials matching."""
         try:
+            # First try to find by login/password
+            query_login = """
+                SELECT uuid, hisnumber_qms, hisnumber_infoclinica, 
+                    lastname, name, surname, birthdate,
+                    login_qms, login_infoclinica
+                FROM patients 
+                WHERE (login_qms = $1 AND password_qms = $2) 
+                OR (login_infoclinica = $1 AND password_infoclinica = $2)
+                LIMIT 1
+            """
+            results = await self.pool.execute_query(query_login, (cllogin, clpassword))
+            
+            if results:
+                row = results[0]
+                return {
+                    'uuid': str(row[0]),
+                    'hisnumber_qms': row[1],
+                    'hisnumber_infoclinica': row[2],
+                    'lastname': row[3],
+                    'name': row[4],
+                    'surname': row[5],
+                    'birthdate': row[6],
+                    'login_qms': row[7],
+                    'login_infoclinica': row[8]
+                }
+            
+            # If not found by credentials, try by personal data
+            bdate_obj = datetime.strptime(bdate, '%Y-%m-%d').date()
+            
             if midname:
-                query = """
-                    SELECT 
-                        uuid, lastname, name, surname, birthdate,
-                        hisnumber_qms, hisnumber_infoclinica,
-                        login_qms, login_infoclinica,
-                        registered_via_mobile, matching_locked
+                query_personal = """
+                    SELECT uuid, hisnumber_qms, hisnumber_infoclinica, 
+                        lastname, name, surname, birthdate,
+                        login_qms, login_infoclinica
                     FROM patients 
-                    WHERE lastname = $1 
-                    AND name = $2 
-                    AND surname = $3
-                    AND birthdate = $4
-                    AND (login_qms = $5 OR login_infoclinica = $5)
+                    WHERE lastname = $1 AND name = $2 AND surname = $3 AND birthdate = $4
                     LIMIT 1
                 """
-                params = (lastname, firstname, midname, bdate, cllogin)
+                results = await self.pool.execute_query(query_personal, (lastname, firstname, midname, bdate_obj))
             else:
-                query = """
-                    SELECT 
-                        uuid, lastname, name, surname, birthdate,
-                        hisnumber_qms, hisnumber_infoclinica,
-                        login_qms, login_infoclinica,
-                        registered_via_mobile, matching_locked
+                query_personal = """
+                    SELECT uuid, hisnumber_qms, hisnumber_infoclinica, 
+                        lastname, name, surname, birthdate,
+                        login_qms, login_infoclinica
                     FROM patients 
-                    WHERE lastname = $1 
-                    AND name = $2 
-                    AND (surname IS NULL OR surname = '')
-                    AND birthdate = $3
-                    AND (login_qms = $4 OR login_infoclinica = $4)
+                    WHERE lastname = $1 AND name = $2 AND birthdate = $3 AND surname IS NULL
                     LIMIT 1
                 """
-                params = (lastname, firstname, bdate, cllogin)
+                results = await self.pool.execute_query(query_personal, (lastname, firstname, bdate_obj))
             
-            results = await self.pool.execute_query(query, params)
+            if results:
+                row = results[0]
+                return {
+                    'uuid': str(row[0]),
+                    'hisnumber_qms': row[1],
+                    'hisnumber_infoclinica': row[2],
+                    'lastname': row[3],
+                    'name': row[4],
+                    'surname': row[5],
+                    'birthdate': row[6],
+                    'login_qms': row[7],
+                    'login_infoclinica': row[8]
+                }
             
-            if not results:
-                return None
-            
-            # Convert to dictionary
-            columns = ['uuid', 'lastname', 'name', 'surname', 'birthdate',
-                      'hisnumber_qms', 'hisnumber_infoclinica', 
-                      'login_qms', 'login_infoclinica',
-                      'registered_via_mobile', 'matching_locked']
-            
-            return dict(zip(columns, results[0]))
+            return None
             
         except Exception as e:
             logger.error(f"Error finding patient by credentials: {e}")
-            raise
+            return None
     
     async def register_mobile_app_user(self, hisnumber_qms: Optional[str], 
                                      hisnumber_infoclinica: Optional[str]) -> Optional[str]:

@@ -481,9 +481,14 @@ async def check_modify_patient(request: PatientCredentialRequest):
     try:
         patient_repo = get_patient_repository()
         
-        # Step 1: Check if patient exists with this login
+        # Step 1: Check if patient exists using all available data
         existing_patient = await patient_repo.find_patient_by_credentials(
-            request.cllogin, request.clpassword
+            request.lastname,
+            request.firstname, 
+            request.midname,
+            request.bdate,
+            request.cllogin,
+            request.clpassword
         )
         
         qms_result = None
