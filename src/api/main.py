@@ -468,6 +468,94 @@ async def register_mobile_app_user_api(hisnumber_qms: Optional[str] = None,
         logger.error(f"Error registering mobile app user: {e}")
         return None
 
+@app.post("/debug-oauth/{his_type}")
+async def debug_oauth(his_type: str):
+    """Debug OAuth authentication for a specific HIS system."""
+    if his_type not in ["yottadb", "firebird"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid HIS type. Must be 'yottadb' or 'firebird'"
+        )
+    
+    try:
+        logger.info(f"=== DEBUG OAuth for {his_type} ===")
+        
+        # Check config
+        if his_type not in HIS_API_CONFIG:
+            return {"error": f"No config found for {his_type}", "available_systems": list(HIS_API_CONFIG.keys())}
+        
+        config = HIS_API_CONFIG[his_type]["oauth"]
+        
+        # Test network connectivity first
+        import socket
+        from urllib.parse import urlparse
+        
+        parsed_url = urlparse(config["token_url"])
+        host = parsed_url.hostname
+        port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+        
+        try:
+            sock = socket.create_connection((host, port), timeout=10)
+            sock.close()
+            connectivity = f"✅ Can connect to {host}:{port}"
+        except Exception as conn_error:
+            connectivity = f"❌ Cannot connect to {host}:{port} - {conn_error}"
+        
+        # Prepare OAuth data
+        oauth_data = {
+            "grant_type": "",
+            "username": config["username"],
+            "password": config["password"], 
+            "scope": "",
+            "client_id": "",
+            "client_secret": "",
+        }
+        
+        debug_info = {
+            "system": his_type,
+            "token_url": config["token_url"],
+            "username": config["username"],
+            "password": "***" if config["password"] else "EMPTY",
+            "connectivity": connectivity,
+            "oauth_request_data": {k: v if k != "password" else "***" for k, v in oauth_data.items()}
+        }
+        
+        # Try OAuth request
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    config["token_url"],
+                    data=oauth_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+                
+                debug_info.update({
+                    "oauth_response_status": response.status_code,
+                    "oauth_response_headers": dict(response.headers),
+                    "oauth_response_body": response.text[:500]  # First 500 chars
+                })
+                
+                if response.status_code == 200:
+                    try:
+                        token_data = response.json()
+                        debug_info["oauth_success"] = "✅ Token obtained"
+                        debug_info["token_preview"] = token_data.get("access_token", "")[:20] + "..." if token_data.get("access_token") else "No access_token"
+                    except:
+                        debug_info["oauth_success"] = "⚠️ Got 200 but invalid JSON"
+                else:
+                    debug_info["oauth_success"] = f"❌ Failed with status {response.status_code}"
+                
+        except Exception as oauth_error:
+            debug_info.update({
+                "oauth_error": str(oauth_error),
+                "oauth_success": f"❌ Network error: {oauth_error}"
+            })
+        
+        return debug_info
+        
+    except Exception as e:
+        return {"error": f"Debug failed: {str(e)}"}
+
 @app.post("/checkModifyPatient")
 async def check_modify_patient(request: PatientCredentialRequest):
     """
