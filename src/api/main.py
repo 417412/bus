@@ -126,47 +126,53 @@ def get_patient_repo() -> PatientRepository:
     return get_patient_repository()
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
-    """
-    Get OAuth token for specified HIS system with proper concurrency control.
-    Uses token caching to avoid repeated authentication.
-    """
+    """Get OAuth token with enhanced debugging."""
     try:
+        logger.info(f"=== Getting OAuth token for {his_type.upper()} ===")
+        
+        # Check if system exists in config
+        if his_type not in HIS_API_CONFIG:
+            logger.error(f"System {his_type} not found in HIS_API_CONFIG")
+            logger.info(f"Available systems: {list(HIS_API_CONFIG.keys())}")
+            return None
+        
+        config = HIS_API_CONFIG[his_type]["oauth"]
+        token_url = config["token_url"]
+        
+        logger.info(f"Token URL: {token_url}")
+        logger.info(f"Username: {config['username']}")
+        
         # Get or create a lock for this HIS system
         if his_type not in oauth_locks:
             oauth_locks[his_type] = asyncio.Lock()
         
         async with oauth_locks[his_type]:
-            # Check if we have a valid cached token (inside the lock)
+            # Check cached token first
             cache_key = f"{his_type}_token"
             cache_expiry_key = f"{his_type}_token_expiry"
             
             if (cache_key in oauth_tokens and 
                 cache_expiry_key in oauth_tokens and 
                 datetime.now() < oauth_tokens[cache_expiry_key]):
-                logger.debug(f"Using cached OAuth token for {his_type.upper()}")
+                logger.info(f"Using cached OAuth token for {his_type.upper()}")
                 return oauth_tokens[cache_key]
             
-            # Get new token (still inside the lock)
-            config = HIS_API_CONFIG[his_type]["oauth"]
-            token_url = config["token_url"]
-            
-            # Prepare OAuth request data - FIXED to match your working curl
+            # Prepare OAuth request data
             oauth_data = {
-                "grant_type": "",  # Empty as in your curl
+                "grant_type": "",
                 "username": config["username"],
                 "password": config["password"], 
-                "scope": "",  # Empty as in your curl
-                "client_id": "",  # Empty as in your curl
-                "client_secret": "",  # Empty as in your curl
+                "scope": "",
+                "client_id": "",
+                "client_secret": "",
             }
             
-            logger.info(f"Requesting OAuth token from {his_type.upper()}: {token_url}")
+            logger.info(f"Making OAuth request to: {token_url}")
             
-            # ENHANCED: Better error handling and network configuration
             try:
                 async with httpx.AsyncClient(
-                    timeout=httpx.Timeout(30.0, connect=10.0),  # Separate connect timeout
-                    follow_redirects=True,  # Follow redirects automatically
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    follow_redirects=True,
                     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
                 ) as client:
                     response = await client.post(
@@ -175,18 +181,21 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
                         headers={"Content-Type": "application/x-www-form-urlencoded"}
                     )
                     
+                    logger.info(f"OAuth response status: {response.status_code}")
+                    logger.info(f"OAuth response body: {response.text}")
+                    
                     if response.status_code == 200:
                         token_response = response.json()
                         access_token = token_response.get("access_token")
-                        expires_in = token_response.get("expires_in", 3600)  # Default 1 hour
+                        expires_in = token_response.get("expires_in", 3600)
                         
                         if access_token:
-                            # Cache the token with expiry buffer (subtract 5 minutes for safety)
+                            # Cache the token
                             expiry_time = datetime.now() + timedelta(seconds=expires_in - 300)
                             oauth_tokens[cache_key] = access_token
                             oauth_tokens[cache_expiry_key] = expiry_time
                             
-                            logger.info(f"Successfully obtained OAuth token for {his_type.upper()}, expires at {expiry_time}")
+                            logger.info(f"Successfully obtained OAuth token for {his_type.upper()}")
                             return access_token
                         else:
                             logger.error(f"OAuth response missing access_token for {his_type.upper()}")
@@ -195,12 +204,6 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
                         logger.error(f"OAuth authentication failed for {his_type.upper()}: {response.status_code} - {response.text}")
                         return None
                         
-            except httpx.ConnectError as e:
-                logger.error(f"Connection failed to {his_type.upper()} OAuth endpoint {token_url}: {e}")
-                return None
-            except httpx.TimeoutException as e:
-                logger.error(f"Timeout connecting to {his_type.upper()} OAuth endpoint {token_url}: {e}")
-                return None
             except Exception as e:
                 logger.error(f"Network error getting OAuth token for {his_type.upper()}: {e}")
                 return None
@@ -617,32 +620,37 @@ async def check_modify_patient(request: PatientCredentialRequest):
 async def update_his_patient_credentials(system_name: str, hisnumber: str, patient_data: PatientCredentialRequest):
     """Update patient login/password credentials in HIS system."""
     try:
-        system_config = HIS_API_CONFIG.get(system_name.lower())
-        if not system_config:
-            return {"success": False, "error": f"Unknown HIS system: {system_name}"}
-        
-        # Map system names to match your config
-        # Since your config uses 'yottadb' and 'firebird' but you might be calling with different names
+        # Fix the system mapping - you're calling with 'infoclinica' but config has 'firebird'
         system_map = {
             'yottadb': 'yottadb',
             'qms': 'yottadb',
             'firebird': 'firebird', 
-            'infoclinica': 'firebird',
+            'infoclinica': 'firebird',  # This mapping should work
             'ic': 'firebird'
         }
         
         actual_system = system_map.get(system_name.lower())
+        logger.info(f"Mapping {system_name} to {actual_system}")
+        
         if not actual_system:
+            logger.error(f"Unknown HIS system: {system_name}")
             return {"success": False, "error": f"Unknown HIS system: {system_name}"}
             
         system_config = HIS_API_CONFIG.get(actual_system)
         if not system_config:
+            logger.error(f"No configuration for HIS system: {actual_system}")
             return {"success": False, "error": f"No configuration for HIS system: {actual_system}"}
         
+        logger.info(f"Using config for {actual_system}: {system_config['base_url']}")
+        
         # Get authentication token
+        logger.info(f"Getting OAuth token for {actual_system}...")
         auth_token = await get_oauth_token(actual_system)
         if not auth_token:
+            logger.error(f"Failed to get auth token for {actual_system}")
             return {"success": False, "error": f"Failed to get auth token for {actual_system}"}
+        
+        logger.info(f"OAuth token obtained for {actual_system}")
         
         # Prepare headers
         headers = {
