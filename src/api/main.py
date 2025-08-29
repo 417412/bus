@@ -126,21 +126,17 @@ def get_patient_repo() -> PatientRepository:
     return get_patient_repository()
 
 async def get_oauth_token(his_type: str) -> Optional[str]:
-    """Get OAuth token with enhanced debugging."""
+    """Get OAuth token with SSL verification disabled for internal systems."""
     try:
         logger.info(f"=== Getting OAuth token for {his_type.upper()} ===")
         
         # Check if system exists in config
         if his_type not in HIS_API_CONFIG:
             logger.error(f"System {his_type} not found in HIS_API_CONFIG")
-            logger.info(f"Available systems: {list(HIS_API_CONFIG.keys())}")
             return None
         
         config = HIS_API_CONFIG[his_type]["oauth"]
         token_url = config["token_url"]
-        
-        logger.info(f"Token URL: {token_url}")
-        logger.info(f"Username: {config['username']}")
         
         # Get or create a lock for this HIS system
         if his_type not in oauth_locks:
@@ -170,9 +166,11 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
             logger.info(f"Making OAuth request to: {token_url}")
             
             try:
+                # FIXED: Disable SSL verification for internal systems
                 async with httpx.AsyncClient(
                     timeout=httpx.Timeout(30.0, connect=10.0),
                     follow_redirects=True,
+                    verify=False,  # ✅ This is the key fix - disable SSL verification
                     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
                 ) as client:
                     response = await client.post(
@@ -182,7 +180,7 @@ async def get_oauth_token(his_type: str) -> Optional[str]:
                     )
                     
                     logger.info(f"OAuth response status: {response.status_code}")
-                    logger.info(f"OAuth response body: {response.text}")
+                    logger.debug(f"OAuth response body: {response.text}")
                     
                     if response.status_code == 200:
                         token_response = response.json()
@@ -348,7 +346,8 @@ async def create_his_patient(his_type: str, patient_data: PatientCredentialReque
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=10.0),
-                follow_redirects=True  # FIXED: This should handle the 307 redirect
+                follow_redirects=True,
+                verify=False
             ) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 
@@ -758,8 +757,10 @@ async def update_his_patient_credentials(system_name: str, hisnumber: str, patie
         }
         
         # Make API call to update credentials
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Use PUT for credential updates
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            verify=False  # ✅ Add this line
+        ) as client:
             response = await client.put(
                 update_url,
                 json=update_data,
