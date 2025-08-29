@@ -7,8 +7,8 @@ echo "Starting Patient Credential Management API..."
 # =============================================================================
 
 # YottaDB API Configuration
-export YOTTADB_API_BASE="https://192.168.156.118:10443"
-export YOTTADB_TOKEN_URL="https://192.168.156.118:10443/token"
+export YOTTADB_API_BASE="https://testqms.hadassah.moscow:10443"
+export YOTTADB_TOKEN_URL="https://testqms.hadassah.moscow:10443/token"
 export YOTTADB_CLIENT_ID=""                             # CHANGED: Empty string (not "admin")
 export YOTTADB_CLIENT_SECRET=""                         # CHANGED: Empty string (not "secret") 
 export YOTTADB_USERNAME="admin"
@@ -16,8 +16,8 @@ export YOTTADB_PASSWORD="secret"
 export YOTTADB_SCOPE=""
 
 # Firebird API Configuration - CORRECTED BASED ON YOUR WORKING CURL
-export FIREBIRD_API_BASE="http://192.168.160.141"
-export FIREBIRD_TOKEN_URL="http://192.168.160.141/token"
+export FIREBIRD_API_BASE="https://192.168.160.141"
+export FIREBIRD_TOKEN_URL="https://192.168.160.141/token"
 export FIREBIRD_CLIENT_ID=""                            # CHANGED: Empty string (not "admin")
 export FIREBIRD_CLIENT_SECRET=""                        # CHANGED: Empty string (not "secret")
 export FIREBIRD_USERNAME="admin"
